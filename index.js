@@ -276,6 +276,27 @@ const REQUIRED_CONTEXT_NAMES = new Set(
 const CONTEXT_ORDERS = new Map(CONTEXT_CATALOG.map((entry) => [entry.name, entry.order]))
 
 /**
+ * Injection sources are user-written TAGS, never discovered or listed here.
+ *
+ * A source is the `source.kind` stamped on a user message a plugin injects
+ * before a step. The page lets the user type those kinds as tags: a preset
+ * whose `injectionBlocks` array names a kind SUPPRESSES it, and every kind
+ * outside that array is injected. There is no catalog to discover and no
+ * `agent/pre-step` observation: the user decides what to block by hand.
+ *
+ * The one protocol constant is `runtime-context`: DSH's agent-loop owns that
+ * message kind and re-projects it from `refreshContext()` instead of copying
+ * `decision.messages`, so the pre-step filter cannot drop it. A
+ * `runtime-context` TAG is therefore enforced on the assemble side (the whole
+ * snapshot disappears, required contributions included). That is message
+ * ownership, not a built-in catalog entry.
+ */
+const RUNTIME_CONTEXT_KIND = 'runtime-context'
+
+/** Source kinds that are never injection sources: the real user input. */
+const USER_MESSAGE_KIND = 'user'
+
+/**
  * Read the prompt registry's OWN context table through one scope.
  *
  * `CONTEXT_CATALOG` is a copy of the bundled rows taken at build time, so its
@@ -390,6 +411,59 @@ function normalizeRequiredSuppression(value) {
 }
 
 /**
+ * Normalize one stored list of BLOCKED context-injection sources.
+ *
+ * The array is a BLOCK list — the opposite of the old `injections` allow
+ * list: a kind named here is suppressed, and every kind outside it keeps
+ * injecting. ABSENT (not an array) and an EMPTY array therefore mean the same
+ * runtime behavior ("block nothing"), but the field is still kept so the page
+ * can tell "never touched" from "the user removed every tag".
+ *
+ * The old `injections` field is deliberately NOT migrated: its meaning was
+ * reversed, so carrying it over would turn a saved allow list into a block
+ * list and silently mute sources the user never chose to mute. Ignoring it
+ * leaves an upgraded preset with the pre-feature behavior (everything
+ * injects).
+ * @param value - the stored `injectionBlocks` field.
+ * @returns the deduplicated kind list, or undefined when unmanaged.
+ */
+function normalizeInjectionBlocks(value) {
+  if (!Array.isArray(value)) return undefined
+  // `user` is the real user input, never an injection source: a stored or
+  // imported tag for it would look like a block that pre-step always ignores.
+  return stringList(value).filter((kind) => kind !== USER_MESSAGE_KIND)
+}
+
+/**
+ * Drop the injection sources a preset named as TAGS.
+ *
+ * The list is a BLOCK list: a message whose `source.kind` is in it is
+ * removed; every other kind keeps injecting. There is no allow-list of
+ * "known" sources, so a third-party plugin's kind is blocked exactly like an
+ * official one once the user types it as a tag. The real user input
+ * (`source.kind === 'user'` or an absent kind) always passes.
+ * `runtime-context` also always passes here: DSH's `step()` re-projects that
+ * message from `refreshContext()` instead of copying `decision.messages`, so
+ * a `runtime-context` tag is enforced on the assemble side instead.
+ *
+ * An ABSENT `blocked` (unmanaged preset) returns the list untouched: the
+ * pre-feature behavior is "inject everything", and that must survive an
+ * upgrade without a migration write.
+ * @param messages - the decision's candidate user messages.
+ * @param blocked - the preset's `injectionBlocks` block list, or undefined.
+ * @returns the messages that may enter the session.
+ */
+export function filterInjectedMessages(messages, blocked) {
+  if (!Array.isArray(messages) || !Array.isArray(blocked)) return messages
+  return messages.filter((message) => {
+    const kind = text(message?.source?.kind)
+    if (kind === '' || kind === USER_MESSAGE_KIND) return true
+    if (kind === RUNTIME_CONTEXT_KIND) return true
+    return blocked.includes(kind) === false
+  })
+}
+
+/**
  * Normalize one stored runtime-context whitelist.
  *
  * ABSENT (not an array) means this preset manages nothing: the snapshot is
@@ -454,6 +528,13 @@ export function normalizePreset(input) {
     // the only thing that can remove the preset's own persona sections.
     sections: normalizeSections(input.sections),
     sectionsSuppressed: normalizeSectionSuppression(input.sectionsSuppressed),
+    // The context-injection sources this preset BLOCKS, as free-form tags.
+    // Absent = unmanaged (every source injects, the pre-feature behavior);
+    // present = the exact block list, where a kind outside it keeps injecting.
+    // This is a SEPARATE layer from `contexts` below: it decides whether whole
+    // injected messages ride along, while `contexts` decides what the
+    // runtime-context snapshot contains.
+    injectionBlocks: normalizeInjectionBlocks(input.injectionBlocks),
     // Absent (not an array) = this preset does not manage the runtime-context
     // snapshot at all; present = the array is the strict whitelist of
     // suppressible context names (required names are always injected anyway,
@@ -1237,6 +1318,11 @@ export class PresetStore {
     } catch {
       /* already released */
     }
+    try {
+      state.injectionFilter?.()
+    } catch {
+      /* already released */
+    }
     // The escape-hatch shadows are per-Agent registrations of their own: a
     // refresh that left them behind would keep shadowing the official required
     // entry even after the preset stopped force-suppressing it.
@@ -1387,7 +1473,15 @@ export class PresetStore {
       // The state object is created BEFORE the tools-service check: the
       // context listener below is installed either way, and a disposer that
       // is never recorded is a leak on the next refresh.
-      state = { restriction: undefined, guards: [], presetId, toolScopeDone: false }
+      state = {
+        restriction: undefined,
+        guards: [],
+        presetId,
+        toolScopeDone: false,
+        injectionFilter: undefined,
+        contextFilter: undefined,
+        contextShadows: [],
+      }
       // Runtime-context snapshot whitelist. `assembly.contexts` is the SEPARATE
       // field the model-facing `Current runtime context. This snapshot
       // supersedes…` block is built from, so neither `complete` nor the
@@ -1403,8 +1497,31 @@ export class PresetStore {
       // only records and passes the assembly through untouched — the same
       // always-observe, filter-only-when-configured split `observeAgentTools`
       // uses for the tool surface.
+      // The context-injection block list rides ON the preset as free-form
+      // tags. ABSENT or EMPTY means this preset blocks nothing (every source
+      // injects); a `runtime-context` tag suppresses the whole snapshot and is
+      // enforced on the assemble side rather than in pre-step — see the
+      // shadow below.
+      const presetInjectionBlocks = normalizeInjectionBlocks(preset.injectionBlocks)
+      const runtimeContextMuted =
+        presetInjectionBlocks !== undefined && presetInjectionBlocks.includes(RUNTIME_CONTEXT_KIND)
+      // The tags pre-step can actually act on. `runtime-context` and `user` are
+      // never dropped there: the first is re-projected by agent-loop and owned
+      // by the assemble filter above, the second is the real user input. A
+      // preset whose tags are all in that set needs no listener at all.
+      const preStepBlocks = (presetInjectionBlocks ?? []).filter(
+        (kind) => kind !== RUNTIME_CONTEXT_KIND && kind !== USER_MESSAGE_KIND,
+      )
       const forcedRequired = new Set(preset.requiredSuppressed ?? [])
-      const allowedContexts = Array.isArray(preset.contexts) ? new Set(preset.contexts) : undefined
+      // A muted `runtime-context` source outranks the per-item whitelist: an
+      // empty allow list drops every contribution, and the required ones are
+      // handled by the shadow below. This is what makes ONE switch suppress
+      // the whole snapshot instead of asking the operator to uncheck rows.
+      const allowedContexts = runtimeContextMuted
+        ? new Set()
+        : Array.isArray(preset.contexts)
+          ? new Set(preset.contexts)
+          : undefined
       const filtersSomething = allowedContexts !== undefined || forcedRequired.size > 0
       // Which names the RUNNING registry refuses to drop, and where it sorts
       // them. Both come from the build's own context table when it can be
@@ -1430,8 +1547,12 @@ export class PresetStore {
       // Only names the RUNTIME still protects need a shadow: an ordinary name
       // in the list is already dropped by the whitelist, and registering an
       // empty context for it would add a layer entry for nothing (and could
-      // collide with a same-named contribution).
-      const shadowedRequired = [...forcedRequired].filter((name) => requiredContexts.has(name))
+      // collide with a same-named contribution). A muted runtime-context
+      // source needs EVERY required name shadowed — the switch means "no
+      // snapshot at all", not "no optional rows".
+      const namesToShadow = new Set(forcedRequired)
+      if (runtimeContextMuted) for (const name of requiredContexts) namesToShadow.add(name)
+      const shadowedRequired = [...namesToShadow].filter((name) => requiredContexts.has(name))
       if (shadowedRequired.length > 0 && typeof agent.ctx.get === 'function') {
         const scopedPrompt = agent.ctx.get('systemPrompt')
         if (scopedPrompt !== undefined && scopedPrompt !== null && typeof scopedPrompt.context === 'function') {
@@ -1486,7 +1607,10 @@ export class PresetStore {
                 // The forced list wins over the required exemption — that is the
                 // entire point of the escape hatch (pair it with the same-name
                 // shadow above, or `refreshContext` restores the entry anyway).
-                if (forcedRequired.has(name)) return false
+                // A muted runtime-context source puts EVERY required name in
+                // this set, so the whole snapshot disappears, not just the
+                // optional rows.
+                if (namesToShadow.has(name)) return false
                 if (requiredContexts.has(name)) return true
                 return allowedContexts === undefined ? true : allowedContexts.has(name)
               })
@@ -1496,14 +1620,47 @@ export class PresetStore {
               // Fail open, never shut: a broken filter must not leave the model
               // without its runtime context — dropping the workspace or the
               // sandbox policy silently is worse than over-injecting.
-              this.ctx.logger?.warn?.(`[my-agent-preset] 运行时上下文过滤失败，已放行全部: ${message(error)}`)
+              this.ctx.logger?.warn?.(`[my-agent-preset] runtime-context 注入过滤失败，已放行全部: ${message(error)}`)
               return assembly
             }
           },
-          // Only the escape hatch may reach OUTSIDE the official repair
-          // listener; a plain whitelist stays inside, exactly as before.
-          forcedRequired.size > 0 ? { prepend: true } : undefined,
+          // Only the escape hatch (or a muted runtime-context source, which
+          // suppresses required rows too) may reach OUTSIDE the official
+          // repair listener; a plain whitelist stays inside, as before.
+          forcedRequired.size > 0 || runtimeContextMuted ? { prepend: true } : undefined,
         )
+        // Context-injection sources. `agent/pre-step` is a waterfall, and this
+        // listener is registered with `prepend: true` ON THE AGENT'S OWN CTX:
+        // the agent scope is created after every plugin, so an unshift lands
+        // outside the injectors (trilogy/context-pilot use a plain `on`, and
+        // time-context prepends earlier) and `next()` returns a decision that
+        // already carries their messages. Dropping a blocked tag there is the
+        // only place it can happen before agent-loop admits it into the
+        // session.
+        //
+        // `runtime-context` is deliberately NOT filtered here: `step()`
+        // re-projects that message from `refreshContext()`, so the assemble
+        // filter above owns it. A preset with no pre-step-actable tag installs
+        // no listener at all — there is nothing to drop.
+        if (typeof agent.ctx.on === 'function' && preStepBlocks.length > 0) {
+          state.injectionFilter = agent.ctx.on(
+            'agent/pre-step',
+            (payload, next) => {
+              const downstream = typeof next === 'function' ? next() : undefined
+              const finish = (decision) => {
+                if (decision === null || typeof decision !== 'object') return decision
+                if (decision.kind !== 'enter' || Array.isArray(decision.messages) === false) return decision
+                const kept = filterInjectedMessages(decision.messages, preStepBlocks)
+                if (kept.length === decision.messages.length) return decision
+                return { ...decision, messages: kept }
+              }
+              return downstream !== null && typeof downstream?.then === 'function'
+                ? Promise.resolve(downstream).then(finish)
+                : finish(downstream)
+            },
+            { prepend: true },
+          )
+        }
       }
       // Tool list. `restrict` hides the process-global tools; the guard refuses
       // the call for the rest, because an inherited built-in and a per-Agent
@@ -1899,6 +2056,28 @@ export class PresetStore {
   }
 
   /**
+   * The context-injection partition for one preset's stored or drafted tags.
+   *
+   * The array is a BLOCK list: every kind named in it is suppressed, every
+   * other kind injects. `managed: false` (an absent field) and an empty array
+   * both mean "nothing is blocked", but the panel still distinguishes them in
+   * its wording. No catalog is involved — the page shows exactly the tags the
+   * user typed, so a saved tag this process has never carried is still
+   * visible. `user` is never a blockable source and is filtered out.
+   * @param injectionBlocks - the stored or drafted `injectionBlocks` array, or undefined.
+   * @returns `{ managed, blocked }` with the block list sorted.
+   */
+  injectionFilterReport(injectionBlocks) {
+    const managed = Array.isArray(injectionBlocks)
+    const blocked = managed
+      ? [...new Set(stringList(injectionBlocks))]
+          .filter((kind) => kind !== '' && kind !== USER_MESSAGE_KIND)
+          .sort((left, right) => left.localeCompare(right))
+      : []
+    return { managed, blocked }
+  }
+
+  /**
    * Wait (briefly) for the prompt registry service to land.
    *
    * `systemPrompt` mounts asynchronously, and the settings page asks `list`
@@ -2078,6 +2257,12 @@ export class PresetStore {
             // (the fields are additive); a Client that reads it can say WHERE
             // the answer came from instead of trusting a shipped table.
             'contextRegistryTruth',
+            // The Host understands the `injectionBlocks` field: a BLOCK list of
+            // context-injection source kinds, typed as tags by the user. A
+            // Client can be hot-reloaded onto an older Host, which would
+            // silently drop the field, so the page gates the whole group on
+            // this marker.
+            'injectionBlocks',
           ],
           // The snapshot list the page renders: every contribution DSH's own
           // rows register (with its `required` flag, because the registry
@@ -2103,6 +2288,8 @@ export class PresetStore {
           // selectable without a release. The persona rows always appear and
           // are marked required.
           sectionCatalog: this.sectionCatalog(),
+          // The context-injection sources are free-form TAGS the user types:
+          // there is no catalog and no runtime observation to ship here.
           registry: rows.map((row) => ({ id: row.id, name: row.name, isDefault: row.isDefault, broken: row.broken })),
         },
       }
@@ -2140,6 +2327,9 @@ export class PresetStore {
         ? {}
         : {
             ...(Array.isArray(listSource.contexts) ? { contexts: listSource.contexts } : {}),
+            ...(Array.isArray(listSource.injectionBlocks)
+              ? { injectionBlocks: listSource.injectionBlocks }
+              : {}),
             ...(Array.isArray(listSource.sections) ? { sections: listSource.sections } : {}),
             ...(Array.isArray(listSource.sectionsSuppressed)
               ? { sectionsSuppressed: listSource.sectionsSuppressed }
@@ -2225,12 +2415,21 @@ export class PresetStore {
     const selection =
       override?.tools !== undefined ? normalizeToolSelection(override.tools) : preset.tools ?? { mode: 'all', names: [] }
     const skills = Array.isArray(override?.skills) ? stringList(override.skills) : preset.skills
-    // The snapshot view is the same recomputation the runtime listener does —
-    // the catalog ∪ what this preset's Agents actually carried, partitioned
-    // against the stored (or drafted) whitelist. Required names always land in
-    // `kept`, because the registry force-restores them.
-    const contextAllowed =
-      override?.contexts !== undefined ? normalizeContexts(override.contexts) : preset.contexts
+    // The context-injection BLOCK list is previewed the same way: an absent
+    // field means "blocks nothing, everything injects"; an array names the
+    // sources the user tagged as blocked. A `runtime-context` tag outranks the
+    // per-item whitelist below, exactly as the runtime filter does.
+    const draftInjectionBlocks =
+      override?.injectionBlocks !== undefined
+        ? normalizeInjectionBlocks(override.injectionBlocks)
+        : preset.injectionBlocks
+    const runtimeContextMuted =
+      draftInjectionBlocks !== undefined && draftInjectionBlocks.includes(RUNTIME_CONTEXT_KIND)
+    const contextAllowed = runtimeContextMuted
+      ? []
+      : override?.contexts !== undefined
+        ? normalizeContexts(override.contexts)
+        : preset.contexts
     // The advanced force-suppress list is previewed the same way: an editor
     // draft overrides the stored value, and the runtime filter reads the very
     // same names.
@@ -2244,10 +2443,17 @@ export class PresetStore {
       override?.sectionsSuppressed !== undefined
         ? normalizeSectionSuppression(override.sectionsSuppressed) ?? []
         : preset.sectionsSuppressed ?? []
-    const contextForced =
+    const contextForcedBase =
       override?.requiredSuppressed !== undefined
         ? normalizeRequiredSuppression(override.requiredSuppressed) ?? []
         : preset.requiredSuppressed ?? []
+    // A muted source suppresses EVERY runtime-required row, not just the ones
+    // the advanced list names — that is what "do not inject the snapshot"
+    // means, and the panel must report those rows as blocked instead of
+    // claiming the registry still protects them.
+    const contextForced = runtimeContextMuted
+      ? [...new Set([...contextForcedBase, ...this.requiredContextNames(requestedId)])]
+      : contextForcedBase
     // Mirror `toDefinition`: any preset that checks a skill keeps the `skill`
     // tool, so the panel answers what actually takes effect.
     const listed = new Set(selection.names)
@@ -2262,6 +2468,10 @@ export class PresetStore {
       // What the checklist would keep / remove under the STORED or DRAFTED
       // selection for THIS preset, so the panel updates as boxes are clicked.
       sectionFilter: this.sectionFilterReport(draftSections, draftSectionSuppressed, requestedId),
+      // The context-injection partition: exactly the tags the user typed as
+      // blocked. Independent of the snapshot partition below; both are shown
+      // side by side.
+      injectionFilter: this.injectionFilterReport(draftInjectionBlocks),
     }
     try {
       const tools = this.ctx.get('tools')

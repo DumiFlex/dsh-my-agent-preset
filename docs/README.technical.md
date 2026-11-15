@@ -17,7 +17,8 @@
 - **多个预设**：卡片网格列表，显示名称、描述、启用/异常状态、提示词、技能数、工具模式与稳定 id。
 - **新增 / 编辑 / 删除 / 启停**：删除为两段式内联确认；停用后立即从注册表移除。
 - **复制预设**：每张卡片底栏在「停用/启用」之后、「删除」之前常驻「复制」按钮（`aps-iconButton`，与相邻按钮同款；不论该预设启用还是停用都提供）。点击 = **完全副本**：提示词、注入方式、快照勾选（含高级强制屏蔽名单）、技能、工具名单原样带过，**启用状态跟随源**（源停用 → 副本也停用）；`id` 留空交由 Host 生成全新的 `custom-xxxxxxxx`，与源无任何关联；名字 = `源名（复制 N）`，**N 从 1 起**，逐个试到无人占用（含停用预设的名字一律算占用；副本的副本直接叠加成 `XX（复制 1）（复制 1）`；不限长、不截断）。副本**紧接源预设之后**入列：Client 组装载荷调现有 `save`，载荷带 `insertAfter` = 源 id，Host 据此插入并把**整列 `order` 重写为文档下标**（一次 persist、一次 reconcile），于是本页卡片顺序与「新建会话」预设列表（注册表按 `order` 排序）完全一致。复制后**不跳转编辑器**，反馈复用页面顶部 `aps-notice` 单行提示「已复制为 ××（复制 1）」，失败走 `aps-error` 行。
-- **运行时上下文（快照）逐项勾选**：编辑器在「提示词」与「技能」之间新增独立分组，逐项控制每轮注入的 `Current runtime context. This snapshot supersedes earlier runtime-context snapshots.` 那段。它是 `assembly.contexts`——与 `sections` **独立的字段**，所以「完全替换」和「自定义」都不曾动过它（那两者只过滤 sections），此前快照在任何注入方式下都全量注入。清单是**白名单**（同技能区语义，不做三模式；带与工具名单同款的过滤搜索框）：勾上 = 注入，未勾 = 屏蔽；带「全选 / 取消全选 + 已选计数」（`aps-linkButton`，只作用于可选项）。上方**过滤搜索框**按名称 / 中文标签 / 描述实时过滤（不区分大小写），显示「匹配 x/y」计数；无匹配时显示专用空态（「没有匹配的上下文」）并隐藏全选 / 取消全选，批量动作只作用于**可见行**——隐藏行保持打开编辑器时的勾选，过滤词是纯视图状态，不写入草稿、不触发自检。目录来自 Host 的 `CONTEXT_CATALOG`（对齐官方 `systemPrompt.context()` 的全部注册点）：`working-directory:current`、`sandbox:policy`、`approval:policy`、`subagent:delegation`、`team:identity`、`harness:source`、`app:web-surface`；此外 Host 在每次组装时**观测**该预设 Agent 实际携带的 context 名（内存观测表，对齐 per-Agent 工具观测表），于是第三方插件注册的项与按工具名动态生成的 `tool:<name>:depth` 也能进清单、标「第三方」。每行 = 中文标签 + 灰色等宽技术名 + 一句说明；排序为已勾选靠前、其余按官方 `CONTEXT_ORDERS`（也就是模型看到的顺序），观测项殿后。排序基准是**打开编辑器时的勾选集合**：编辑途中勾选/取消不会让行跳动，保存后重进才按新的勾选重排。**未管理 ≠ 空白名单**：字段缺失表示「全部注入」，保存时不会把当前目录物化成白名单——否则目录随后增长（插件新注册的段 / 运行中观测到的 context）时，旧预设只显示旧行勾选、新建预设显示新行勾选，两者对不上；只有用户真的点过一次复选框或批量按钮，数组才会写入并成为严格白名单。
+- **上下文注入 tag（屏蔽列表）**：编辑器在「提示词」之后、runtime-context 条目清单之前新增独立分组，用**自由 tag** 控制**整段注入消息**：tag 就是一个 `source.kind`（如 `context-pilot`、`runtime-context`），列表里有就屏蔽、没有就放行。**不内置来源目录、不监听 `agent/pre-step` 做发现、不读会话历史、不轮询**：用户手动输入 tag，回车 /「添加」新增，× / 空输入退格删除；拒绝 `user`、重复与空白。字段缺失或空数组 = 全部放行；数组 = 屏蔽列表（对之后出现的同名来源同样生效）。`runtime-context` tag 走 assemble 侧：`assembly.contexts` 全部丢弃（含 required，用同名 shadow + `prepend` 过滤）；pre-step 负责其余所有来源，且只有存在可作用的 tag 时才安装监听器。旧 `injections` 白名单字段**不迁移、直接忽略**。自检面板只显示用户输入的屏蔽 tag（未管理 / 空列表分别措辞）。
+- **runtime-context 注入（快照）逐项勾选**：编辑器在「提示词」与「技能」之间新增独立分组，逐项控制每轮注入的 `Current runtime context. This snapshot supersedes earlier runtime-context snapshots.` 那段。它是 `assembly.contexts`——与 `sections` **独立的字段**，所以「完全替换」和「自定义」都不曾动过它（那两者只过滤 sections），此前快照在任何注入方式下都全量注入。清单是**白名单**（同技能区语义，不做三模式；带与工具名单同款的过滤搜索框）：勾上 = 注入，未勾 = 屏蔽；带「全选 / 取消全选 + 已选计数」（`aps-linkButton`，只作用于可选项）。上方**过滤搜索框**按名称 / 中文标签 / 描述实时过滤（不区分大小写），显示「匹配 x/y」计数；无匹配时显示专用空态（「没有匹配的上下文」）并隐藏全选 / 取消全选，批量动作只作用于**可见行**——隐藏行保持打开编辑器时的勾选，过滤词是纯视图状态，不写入草稿、不触发自检。目录来自 Host 的 `CONTEXT_CATALOG`（对齐官方 `systemPrompt.context()` 的全部注册点）：`working-directory:current`、`sandbox:policy`、`approval:policy`、`subagent:delegation`、`team:identity`、`harness:source`、`app:web-surface`；此外 Host 在每次组装时**观测**该预设 Agent 实际携带的 context 名（内存观测表，对齐 per-Agent 工具观测表），于是第三方插件注册的项与按工具名动态生成的 `tool:<name>:depth` 也能进清单、标「第三方」。每行 = 中文标签 + 灰色等宽技术名 + 一句说明；排序为已勾选靠前、其余按官方 `CONTEXT_ORDERS`（也就是模型看到的顺序），观测项殿后。排序基准是**打开编辑器时的勾选集合**：编辑途中勾选/取消不会让行跳动，保存后重进才按新的勾选重排。**未管理 ≠ 空白名单**：字段缺失表示「全部注入」，保存时不会把当前目录物化成白名单——否则目录随后增长（插件新注册的段 / 运行中观测到的 context）时，旧预设只显示旧行勾选、新建预设显示新行勾选，两者对不上；只有用户真的点过一次复选框或批量按钮，数组才会写入并成为严格白名单。
 - **必需项的「高级 · 强制屏蔽」（默认关闭）**：DSH 把 `working-directory:current` 与 `team:identity` 标为 `required: true` 并在**三层**强制注入——`assemble()` 的 required 通道、agent-loop 每步调用的 `refreshContext()`、以及 `dsh-working-directory` 自己那个 `prepend` 修复监听器（发现该项不见了就 `unshift` 补回，见其 `lib/index.js:48-61`）。普通白名单穿透不了，所以这两行的**主复选框是只读呈现**（勾选 = 正在注入，`disabled` = 这个开关管不到它），行下另挂一个**默认不勾**的「高级 · 强制屏蔽这一项」。勾上它，Host 用两个对抗手段真正关掉：① 在**该 Agent 自己的作用域**注册**同名但不带 `required`** 的 context——scoped 同名项在 merge 中遮蔽全局项，`refreshContext()` 因此不再把它当 required 补回；② 把本插件的组装过滤器注册成 `prepend`，让删除落在官方修复监听器**之外**。两者叠加经实测有效（见「验证状态」）。之所以做成默认关闭的高级项：它依赖实现细节而非公开契约，**DSH 升级可能让它悄悄失效且不报错**；且屏蔽「当前工作区」会让模型失去位置感、可能猜错路径——勾选后页面就地显示这段警告。这个勾选框只在当前 Host 声明支持时出现（`meta.capabilities` 含 `requiredSuppression`）：Client 可以热更新到一个尚未重启的旧 Host 上，而旧 Host 会静默丢弃该字段——与其给一个「勾了没反应」的开关，不如让它不出现，并把文档里已存的屏蔽如实读成「此 Host 不支持强制屏蔽（该项仍会注入）」。取消勾选是恢复官方默认，无需确认。`contexts` 数组里**永远不会**出现必需项名字：它是否注入只由这个高级名单决定。
 - **导出 / 导入预设列表**：列表页简介小字下方一行依次是「+ 新建预设模式」「导出预设列表」「导入预设列表」（`aps-btn` / `aps-btnPrimary`，都在 `aps-listActions` 里，不再挤在组标题右侧）。导出弹窗复用共享的 `PresetSelectDialog`（shell `Modal` + `Button`，行样式沿用 `aps-row`），默认全选、支持全选/取消全选与已选计数。底部两个动作：**复制基础信息到剪贴板**仍只写 `[{ id, name, description }]`（列表顺序、含停用、提示词/技能/工具不外泄，优先 `navigator.clipboard.writeText`，非安全上下文回落临时 `textarea` + `execCommand`）；**导出到本地**把勾选预设的完整可移植信息（`name / description / instructions / instructionMode / contexts / requiredSuppressed / sections / sectionsSuppressed / skills / tools / enabled`，刻意不带 `id / order / status / 时间戳`）序列化为带缩进的 JSON，通过 Blob + 临时 `<a download>` 下载（文件名 `agent-presets-YYYYMMDD-HHmmss.json`）。导入按钮触发隐藏的 `<input type="file" accept=".json,application/json">`，读取后校验为 JSON 数组（也容忍 `{ presets: [...] }`），逐条只保留已知字段、丢弃 id/order，文件内同名条目也全部保留；没有可用预设或 JSON 非法时 `window.alert` 提示格式不正确。确认导入后逐条调用 Host `save`（`id: ''` 让 Host 重新生成 id，`order` 从当前最大值往后排），与已有名称（trim + 小写）相同的条目自动重命名为 `原名（导入 N）`（N 从 1 起，扫描已存名称与本批次已分配名称，停用预设也算占用）；`finally` 中 `refresh()`，有重命名时提示「已导入 N 个预设，其中 M 个同名预设已自动重命名」，否则提示「已导入 N 个预设」。
 - **提示词**：写入该模式的系统提示词，注入方式三选一：**追加**（只用这段文字替换人设前缀，保留 DSH 其它系统提示词）、**完全替换**（仅用这段文字，移除所有其它提示词）、**自定义**（只用这段文字作为人设，并按下方勾选决定注入哪些提示词段：勾选 = 保留，未勾选 = 屏蔽；不再默认屏蔽 DSH 官方段，预设自身的人设段始终保留）。注意「自定义」下提示词留空 = 不注入人设。
@@ -80,7 +81,7 @@ provider 的实现对齐 skills-manager 的三个机制：
 - `deployment:persona-suffix` 是 DSH 官方注册的普通段，本插件不再特殊处理：它按清单勾选注入或屏蔽。
 - 没有内置的官方命名空间表：段清单完全由勾选决定，第三方插件与 `mcp:<server>` 段默认保留，直到用户取消勾选。
 
-**段目录来自运行中的注册表**（`readSectionNames` 读 `systemPrompt.layers.merge(scope).sections` 的 keys），与运行时上下文是同一套 `layers.merge` 探针；`list` 的 `meta.sectionCatalog` 合并全局层与每个预设 scope，并固定补上预设自己的人设前缀段（`required: true`，`present` 表示该名字是否真的注册过）；官方 `persona-suffix` 若在 live registry 中，则作为普通行列出。页面用与 `ContextPicker` 完全相同的勾选组件（`SectionPicker`）：全选 / 取消全选 / 已选计数、已勾选靠前、普通行可切换；两者共用同一套过滤搜索框（`aps-filter` + `aps-input` 搜索输入）——段清单按名称、上下文清单按名称 / 标签 / 描述实时过滤，显示「匹配 x/y」计数，无匹配时显示「没有匹配的提示词段」/「没有匹配的上下文」并隐藏批量按钮，全选 / 取消全选只作用于可见行，过滤词变化时按当前勾选重新排序。人设行勾选且禁用，旁边一行「高级 · 强制屏蔽这一项（官方本不允许）」。
+**段目录来自运行中的注册表**（`readSectionNames` 读 `systemPrompt.layers.merge(scope).sections` 的 keys），与runtime-context 注入是同一套 `layers.merge` 探针；`list` 的 `meta.sectionCatalog` 合并全局层与每个预设 scope，并固定补上预设自己的人设前缀段（`required: true`，`present` 表示该名字是否真的注册过）；官方 `persona-suffix` 若在 live registry 中，则作为普通行列出。页面用与 `ContextPicker` 完全相同的勾选组件（`SectionPicker`）：全选 / 取消全选 / 已选计数、已勾选靠前、普通行可切换；两者共用同一套过滤搜索框（`aps-filter` + `aps-input` 搜索输入）——段清单按名称、上下文清单按名称 / 标签 / 描述实时过滤，显示「匹配 x/y」计数，无匹配时显示「没有匹配的提示词段」/「没有匹配的上下文」并隐藏批量按钮，全选 / 取消全选只作用于可见行，过滤词变化时按当前勾选重新排序。人设行勾选且禁用，旁边一行「高级 · 强制屏蔽这一项（官方本不允许）」。
 
 **自检与运行时同源**：`resolveSectionSelection(names, allowed, suppressed)` 同时服务 `inspect` 的 dry-run 与 capability 的运行时过滤，因此面板里的 `kept` / `blocked` 计数与两个名单就是真正会执行的决定。`inspect` 接受草稿覆盖（`sections: null` = 不管理，显式覆盖存储值），勾选变化并入 `inspectKey`，350ms 防抖后重读。`available: false` 表示注册表不可读，不会谎报 0；`managed: false` 表示该预设不管理段清单（全部注入）。
 
@@ -157,7 +158,7 @@ Agent 加入预设发生在创建之后，因此安装时机覆盖三种：`agen
 
 预设继承基准预设（默认 `standard`）的全部非 persona 行，因此其 Agent 天然拥有部署的内置工具；本插件的工具菜单是**在这个面上做收窄**，而不是逐行重建。设置页的候选清单就是这个完整继承面（内置工具标「内置」、可被 restrict 隐藏的标「全局」）。
 
-## 运行时上下文（快照）如何生效
+## runtime-context 注入（快照）如何生效
 
 模型每轮看到的 `Current runtime context…` 那段不是提示词 section，而是 **`assembly.contexts`**：`dsh-agent-loop` 每步 `assemble()` 后取 `renderContextSections()` 拼成文本，作为 user 消息注入会话（`RuntimeContextProjection.project`）。因为它与 `sections` 是两个字段，本插件此前的「完全替换」（`complete: true`）和「自定义」（section 过滤）都碰不到它——快照永远全量注入。现在勾选清单直接过滤这个字段：
 
@@ -171,6 +172,19 @@ Agent 加入预设发生在创建之后，因此安装时机覆盖三种：`agen
 | 预览 | `inspect` 用与运行时**同一个**分区函数 `resolveContextSelection(surface, contexts, requiredSuppressed)` 复算「保留 / 已屏蔽」，dry-run 覆盖同样接受 `config.contexts` 与 `config.requiredSuppressed`；被强制屏蔽的必需项会出现在「已屏蔽」名单里并标 `forcedContexts`。快照勾选（含高级名单）并入 `inspectKey`，350ms 防抖自动重读，与工具/技能完全一致。 |
 
 **语义要点**：快照勾选与三种注入方式**互不干扰**（它过滤的是 contexts，那两者动的是 sections）；屏蔽**只影响该预设自己的 Agent**，不递归到它派生的子 Agent；屏蔽**不回改会话历史**里已注入的旧快照，只影响此后每一轮组装。复制预设时 `contexts` 与 `requiredSuppressed` 都原样带过：未管理的源复制出未管理的副本，已管理的副本继承同一份白名单与同一份强制屏蔽名单。数据文件里 `contexts` **只写可选项名字**——必需项是否注入完全由 `requiredSuppressed` 决定，两处不重复记账。
+
+## 上下文注入来源如何生效（tag 屏蔽列表）
+
+注入来源是**整段 user 消息**的 `source.kind`，与 `assembly.contexts`（快照里的条目）是两层：前者决定「这段话是否出现」，后者决定「快照里保留哪些条目」。设置页把它做成**自由 tag 列表**：用户手动输入要屏蔽的 `source.kind`，tag 列表里有就屏蔽、没有就放行。**不内置来源目录、不监听 `agent/pre-step` 做发现、不读会话历史、不轮询**——这是一个纯手输的黑名单。
+
+| 环节 | 机制 |
+|---|---|
+| 普通来源（除 runtime-context 外的所有 kind） | `installAgentScope` 在 **Agent 自己的 ctx** 上以 `{ prepend: true }` 注册 `agent/pre-step` waterfall 监听器，且**只在预设至少有一个 pre-step 可作用的 tag**（非 `runtime-context`、非 `user`）时安装。Cordis 的 waterfall 按 hooks 数组顺序调用，`prepend` 是 `unshift`（更外层），`next()` 返回的是内层注入插件追加后的 decision。Agent scope 创建时间晚于全部插件，因此这个监听器位于 `time-context`（同样 `prepend`、但注册更早）以及普通 `push` 的注入插件之外，能一次看到全部注入。过滤走导出的纯函数 `filterInjectedMessages(messages, blocked)`：`kind ∈ blocked` 的消息被删，其余全部放行；没有「已知来源」集合，第三方 kind 只要被用户写成 tag 就同样生效。 |
+| runtime-context（整段快照） | `dsh-agent-loop` 的 `step()` **不直接采用** decision 里的 runtime-context 消息：它用 `refreshContext()` + `RuntimeContextProjection.project()` 重新投影，所以 pre-step 删消息无效。`injectionBlocks` 含 `runtime-context` 时，`system-prompt/assemble` 过滤器把 `allowedContexts` 强制为**空集合**，并对运行时全部 required 名注册同名 shadow（`text: () => ''`、`interpolate: false`），过滤器本身以 `prepend` 注册——与「高级 · 强制屏蔽」同一套实测有效手段。首次组装若从无快照，`project([])` 返回 `undefined`，整段不注入；**已经注入过快照的会话**里，官方会写一条固定的 `Current runtime context: none` 说明（`CLEARED`），它不含任何环境信息，pre-step 无法拦截。 |
+| 预览与自检 | `inspect` 的 `injectionFilter` 由 `injectionFilterReport(draft.injectionBlocks)` 计算，只返回 `{ managed, blocked }`：`blocked` 就是用户输入的 tag（去重、排序、剔除 `user` 与空串），**不声称运行时观察结果**。`contexts` 分区在 `runtimeContextMuted` 时同样把全部 required 行并入 `forcedContexts`，所以自检里的「被屏蔽」名单和真实运行一致。 |
+| 降级 | `injectionBlocks` 缺失（旧预设）或空数组 = 不屏蔽任何来源（全部注入）；数组 = 屏蔽列表。旧的 `injections` 白名单字段**不迁移、直接忽略**——语义相反，迁移会把旧「允许」反转成「屏蔽」，静默屏蔽用户从未选择屏蔽的来源。Client 通过 `capabilities` 是否含 `injectionBlocks` 决定是否渲染该分组（新 Client 热更到旧 Host 时不显示一个保存后被丢弃的控件）。 |
+
+**限制**：屏蔽只对**之后的注入**生效，已写入会话历史的注入消息不会追删；过滤依赖 pre-step 的注册位置，若某个插件绕过 pre-step 直接写 session，本插件无法拦截。tag 名称拼错不会报错——它只是匹配不到任何来源，也就什么都不屏蔽。
 
 ## 与其他工具管理插件冲突（重要）
 
@@ -215,11 +229,11 @@ Agent 加入预设发生在创建之后，因此安装时机覆盖三种：`agen
 
 | 端点 | 请求体 | 说明 |
 |---|---|---|
-| `list` | `{}` | 预设与状态、全局工具目录、按来源分组的技能目录、**快照上下文目录 `meta.contextCatalog`**（每行带 `required` / `order` / `known` / `source`：`registry` 表示读自运行时注册表，`table`/`observed` 表示回退到内置表或观测表）、`meta.contextRegistry`（`readable` / `scoped` / `scopeKeys`）、**段目录 `meta.sectionCatalog`**（每行 `{ name, required, present }`，固定包含人设前缀段，`present` 表示该名字是否真的注册过）、**能力标记 `meta.capabilities`**（`snapshotContexts` / `presetDuplicate` / `requiredSuppression` / `contextRegistryTruth`，供 Client 判断当前 Host 到底懂哪些字段） |
+| `list` | `{}` | 预设与状态、全局工具目录、按来源分组的技能目录、**快照上下文目录 `meta.contextCatalog`**（每行带 `required` / `order` / `known` / `source`：`registry` 表示读自运行时注册表，`table`/`observed` 表示回退到内置表或观测表）、`meta.contextRegistry`（`readable` / `scoped` / `scopeKeys`）、**段目录 `meta.sectionCatalog`**（每行 `{ name, required, present }`，固定包含人设前缀段，`present` 表示该名字是否真的注册过）、**能力标记 `meta.capabilities`**（`snapshotContexts` / `presetDuplicate` / `requiredSuppression` / `contextRegistryTruth` / `injectionBlocks`，供 Client 判断当前 Host 到底懂哪些字段；注入来源不提供目录，由用户手输 tag） |
 | `save` | 预设对象（无 `id` 表示新建；可选 `insertAfter: <源 id>` 把新预设插在该预设之后并把整列 `order` 重写为文档下标——复制预设用） | 校验并落盘，随后重新注册 |
 | `delete` | `{ id }` | 删除并重新注册其余预设 |
 | `toggle` | `{ id }` | 启用/停用 |
-| `inspect` | `{ id, config? }` | 读取该预设继承的工具面并套用本页配置，返回可用/被拒工具、启用技能、**保留/已屏蔽的快照上下文（`contexts` / `blockedContexts` / `forcedContexts` / `contextsManaged`）**——分区用的是与该预设运行时过滤**同一份** live `required` / `order`；`sectionFilter` 按 `config` 里的草稿清单重算（`blocked` / `kept` / `managed` 计数 + `blockedList` / `keptList` 名单），编辑器每勾选一次就能看到分区变化；可选 `config: { tools, skills, contexts, requiredSuppressed, sections, sectionsSuppressed }` 为编辑器未保存内容的 dry-run 覆盖（结果带 `draft: true`；`sections: null` 表示草稿不管理，显式覆盖存储值） |
+| `inspect` | `{ id, config? }` | 读取该预设继承的工具面并套用本页配置，返回可用/被拒工具、启用技能、**保留/已屏蔽的快照上下文（`contexts` / `blockedContexts` / `forcedContexts` / `contextsManaged`）**——分区用的是与该预设运行时过滤**同一份** live `required` / `order`；`sectionFilter` 按 `config` 里的草稿清单重算（`blocked` / `kept` / `managed` 计数 + `blockedList` / `keptList` 名单），编辑器每勾选一次就能看到分区变化；`injectionFilter` 按 `config.injectionBlocks` 重算注入来源分区（只有 `managed` / `blocked`，即用户输入的屏蔽 tag）；列表含 `runtime-context` 时 `contexts` 分区的 required 行会并入 `forcedContexts`。可选 `config: { tools, skills, contexts, injectionBlocks, requiredSuppressed, sections, sectionsSuppressed }` 为编辑器未保存内容的 dry-run 覆盖（结果带 `draft: true`；`sections: null` / `injectionBlocks: null` 表示草稿不管理，显式覆盖存储值） |
 | `reload` | `{}` | 从数据文件重新注册全部预设 |
 
 ## 验证状态
@@ -232,7 +246,7 @@ Agent 加入预设发生在创建之后，因此安装时机覆盖三种：`agen
   - `system-prompt/assemble` 过滤：被拒工具与其 `tool:` guidance 段从组装结果剔除，名单内工具与普通段保留。
   - baseline 预挂载：启动（无需打开设置页）即 `acquireScope(default)`；重复 reconcile 不重复 compose。
   - per-Agent 观测表：`subagent` 进入候选目录并标记 `global:false`；inspect 的 `listedUnavailable` 不再误报 per-Agent 工具。
-- **运行时上下文真值（`verify-context-registry-truth.mjs`）**
+- **runtime-context 注入真值（`verify-context-registry-truth.mjs`）**
   - 真实 `SystemPrompt` + `createScope` 下，`requiredContextNames` / `contextCatalog` 读到注册表的 `required` 与 `order`，而非内置表。
   - 新版新增的必需项（内置表根本没听过）既被过滤放行、也在面板标 `required`/`known:false`；旧版撤销必需性的行反而变成可关闭。
   - 注册表实存但从未被任何 Agent 观测到的 context 也进入目录（否则面板恰好藏起最该展示的那一行）。
@@ -280,7 +294,8 @@ Agent 加入预设发生在创建之后，因此安装时机覆盖三种：`agen
 
 - **自定义段清单（`node test/verify-custom-sections.mjs`、`node test/verify-section-checklist-ui.mjs`）**：模拟 root → preset scope → agent scope 的真实层级。覆盖：未管理时全部段注入；保留名单外的段（含官方与第三方）被移除；空名单只留人设段；「高级 · 强制屏蔽」移除人设段；`tools` / `contexts` 原样保留；预设人设段保留且文本与用户输入一致；`complete` 仍只留人设段。
 
-- **复制预设 + 运行时上下文分组（`node test/verify-copy-and-contexts-ui.mjs`，Client 渲染级，全部通过）**：与导出测试共用 `_studio-harness.mjs`（浏览器桩 + React shim + 弹窗桩 + Host API 录制）。覆盖：三张卡片底栏都有「复制」、位置严格是「停用/启用 → 复制 → 删除」、样式 `aps-iconButton`、**停用卡片同样提供**；点击复制的载荷 = `id:''` + 名字 `审查（复制 2）`（源名的（复制 1）已被别的卡片占用时继续递增）+ `insertAfter` 指向源 + 启用状态与各字段逐项一致 + `contexts` 原样带过，成功提示含新名字，页面**停留在列表**；未管理的源复制出的载荷不带 `contexts`。编辑器分组顺序「提示词 → 运行时上下文 → 技能」；每个目录项一行（中文标签 + 技术名 + 说明），两个 required 行勾选且**禁用**、带「必需 · 不可关闭」标签；取消一个可选项后保存的数组不含它但两个必需名仍在；**未管理预设打开时全勾**，直接保存**保持未管理**（不把目录物化成白名单）；「取消全选」只清空可选项、必需项仍勾选。自检面板渲染「保留快照 3」「已屏蔽 2」计数与两个名单（屏蔽名单含观测到的第三方项），未管理预设显示「未管理快照」而不是计数。
+- **上下文注入 tag（`node test/verify-injection-sources.mjs`，Host 纯函数 + Client 渲染级，全部通过）**：覆盖 `filterInjectedMessages` 把第二个参数当**屏蔽列表**（命中的 kind 被删、其余全放行，第三方与官方同等）、`user` 永不放行、`runtime-context` 留给 assemble 侧、缺失 / 空列表不屏蔽任何来源；`normalizePreset` 的缺失 / 空数组 / 去重，以及**旧 `injections` 白名单被忽略、不反转**；`injectionFilterReport` 只返回 `managed` / `blocked`（去重、排序、剔除 `user`）；`installAgentScope` 仅在存在 pre-step 可作用的 tag 时以 `prepend: true` 安装（`runtime-context` 单独成 tag 时不装）；编辑器为 tag 输入（回车 / 添加按钮新增、× / 空输入退格删除）、拒绝 `user` / 重复 / 空白、计数与 runtime-context 警告、保存写入 `injectionBlocks`；自检只显示用户输入的屏蔽 tag，未管理 / 空列表措辞正确。
+- **复制预设 + runtime-context 注入分组（`node test/verify-copy-and-contexts-ui.mjs`，Client 渲染级，全部通过）**：与导出测试共用 `_studio-harness.mjs`（浏览器桩 + React shim + 弹窗桩 + Host API 录制）。覆盖：三张卡片底栏都有「复制」、位置严格是「停用/启用 → 复制 → 删除」、样式 `aps-iconButton`、**停用卡片同样提供**；点击复制的载荷 = `id:''` + 名字 `审查（复制 2）`（源名的（复制 1）已被别的卡片占用时继续递增）+ `insertAfter` 指向源 + 启用状态与各字段逐项一致 + `contexts` 原样带过，成功提示含新名字，页面**停留在列表**；未管理的源复制出的载荷不带 `contexts`。编辑器分组顺序「提示词 → 上下文注入 → runtime-context 注入 → 技能」；注入分组是 tag 输入而不是勾选清单（测试里只校验分组顺序与字段透传）；每个目录项一行（中文标签 + 技术名 + 说明），两个 required 行勾选且**禁用**、带「必需 · 不可关闭」标签；取消一个可选项后保存的数组不含它但两个必需名仍在；**未管理预设打开时全勾**，直接保存**保持未管理**（不把目录物化成白名单）；「取消全选」只清空可选项、必需项仍勾选。自检面板渲染「保留快照 3」「已屏蔽 2」计数与两个名单（屏蔽名单含观测到的第三方项），未管理预设显示「未管理快照」而不是计数。
 - **快照白名单端到端（`node test/verify-context-snapshot.mjs`）**：驱动**真实** `SystemPrompt` 服务 + root → preset scope → agent scope 三层，装上 store 的 Agent scope 后组装。覆盖：托管预设只注入勾选的可选项，**白名单里没写的两个 required 项照样注入**，未勾选的官方项与未知第三方项一律屏蔽；`refreshContext()`（agent-loop 每步都调）保留 required 且**不复活**被屏蔽项；未管理预设（字段缺失）注入**全部**官方项与第三方项，升级零行为变化。纯函数侧：`normalizePreset` 缺失字段 = `undefined`、数组去重裁剪、非数组不算白名单；`resolveContextSelection` 的保留/屏蔽分区与 `CONTEXT_ORDERS` 顺序（观测项殿后）；`insertAndReindex` 副本插到源之后且整列 order 重写为下标、未知源回落追加；副本命名从「（复制 1）」起、被占用则递增、副本的副本直接叠加。
 - **既有测试修复**：`verify-export-clipboard.mjs` 此前已因导出改为弹窗 + 引入 `dsh-client-ui-primitives` 而**完全跑不起来**（`unexpected require`）。现改为共用 harness，并驱动两步（开弹窗 → 按「复制基础信息到剪贴板」）；新增断言覆盖失败路径留在弹窗内不关闭、空列表时复制按钮禁用。
 - **旧 Host 降级（同一测试内）**：Cordis 进程内缓存已 import 的模块，Host 半的代码**要重启 dsh 进程才生效**，所以「新 Client + 旧 Host」是安装后、重启前的真实状态。此时 `meta` 没有 `contextCatalog`：页面显示空态提示、隐藏分组头的已选计数（空目录谎报「已选 0 项」比不显示更糟），自检面板整块不显示快照计数，`save` **不**从空目录凭空生成白名单。新 Host 的 `CONTEXT_CATALOG` 是硬编码的，永不为空，因此该降级路径不会影响正常语义。
@@ -314,6 +329,7 @@ Agent 加入预设发生在创建之后，因此安装时机覆盖三种：`agen
 
 - 工具名单对**内置工具**的收窄原本只能停留在调用级（guard）：DSH 的 `restrict` 契约无法隐藏同一作用域层注册的工具。现在 `system-prompt/assemble` 过滤会把被拒工具连同其 `tool:` guidance 段一并从提示词组装中剔除，模型的工具清单不再携带它们——但这仍是**提示词卫生**：`schemas()` 层面这些工具依旧可见，调用级由 guard 拒绝兜底。
 - 技能的目录级裁剪覆盖**全部**未勾选的基线技能（被压成 `modelInvocable: false`，退出模型上下文）：有源文件的走 locator 直读，无 path 的内置/bundled 技能靠 rank 取胜、正文不可达——两者都不再出现在模型目录里；调用级仍由 `skill` guard 兜底拒绝。
+- **上下文注入来源的屏蔽只影响后续注入**：pre-step 过滤器作用于本轮 decision，已写入会话历史的注入消息不会被追删；`runtime-context` 关闭后，已有旧快照的会话仍会收到一条固定的 `Current runtime context: none` 说明（不含环境信息，pre-step 无法拦截）。过滤还依赖注入插件经过 `agent/pre-step`；绕过该事件直接写 session 的插件不受本开关控制。
 - 技能来源路径在**保存/重载时**解析一次；技能文件被移动后需重新保存该预设。
 - 预设只在**新建会话**时绑定；已存在的会话保留创建时的 revision，改完预设请新建会话。
 - 预设不是安全沙箱：预设行在 Host 进程内执行。
@@ -322,9 +338,9 @@ Agent 加入预设发生在创建之后，因此安装时机覆盖三种：`agen
 
 | 文件 | 职责 |
 |---|---|
-| `index.js` | Host 半：数据文件读写、基准行读取、预设注册、技能来源目录、**运行时注册表视图（`required`/`order` 真值）**、快照上下文目录与过滤监听、复制插入（`insertAfter` + order 重写）、运行时自检、本地 HTTP API |
+| `index.js` | Host 半：数据文件读写、基准行读取、预设注册、技能来源目录、**运行时注册表视图（`required`/`order` 真值）**、快照上下文目录与过滤监听、**注入来源目录与 pre-step 过滤（`filterInjectedMessages`）**、复制插入（`insertAfter` + order 重写）、运行时自检、本地 HTTP API |
 | `capability.js` | 预设内挂载的能力行：提示词 section、技能 provider 注入、**段勾选过滤（`resolveSectionSelection` + `system-prompt/assemble` 监听器）**（快照过滤不在这里——它是 per-Agent 工作，与工具 restrict/guard 同侧放 Host） |
-| `client.js` | Client 半：设置页 section（列表 + 复制 + 编辑器 + 运行时上下文勾选清单 + 技能二级菜单 + 运行时自检），自带 CSS |
+| `client.js` | Client 半：设置页 section（列表 + 复制 + 编辑器 + 上下文注入来源清单 + runtime-context 注入勾选清单 + 技能二级菜单 + 运行时自检），自带 CSS |
 | `cordis.patch.yml` | bundle 补丁：插入 Host 行 |
 | `locale/*.json` | 插件清单中显示的中英文标题与描述 |
 | `icon.svg` | 插件图标 |

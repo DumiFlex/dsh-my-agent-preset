@@ -34,6 +34,8 @@ const MANAGED = {
   // Only the optional half ever lands in `contexts`; required names are decided
   // by the advanced `requiredSuppressed` list alone.
   contexts: ['sandbox:policy', 'approval:policy', 'harness:source'],
+  // A tag list rides along on a copy exactly like the snapshot whitelist.
+  injectionBlocks: ['context-pilot'],
   skills: ['pdf'],
   tools: { mode: 'allow', names: ['bash', 'read'] },
   enabled: true,
@@ -72,13 +74,33 @@ const FORCED = {
 const PRESETS = [MANAGED, UNMANAGED, TAKEN]
 
 /** A Host that understands snapshot whitelists AND the force-suppress hatch. */
-const META = { registryAvailable: true, contextCatalog: CATALOG, capabilities: ['snapshotContexts', 'requiredSuppression'] }
+const META = {
+  registryAvailable: true,
+  contextCatalog: CATALOG,
+  capabilities: ['snapshotContexts', 'requiredSuppression', 'contextRegistryTruth', 'injectionBlocks'],
+}
 
+/** The field whose label identifies the runtime-context item list. */
+const contextFieldFor = (tree) =>
+  findNodes(
+    tree,
+    (node) =>
+      classNameOf(node) === 'aps-field' &&
+      findNodes(node, (inner) => classNameOf(inner) === 'aps-label').some(
+        (inner) => textOf(inner) === '注入的 runtime-context 项',
+      ),
+  )[0]
 /** The row wrapper of one catalog entry (main box, plus its advanced box). */
-const mainRowsIn = (tree) =>
-  findNodes(tree, (n) => classNameOf(n) === 'aps-checkRow' && classNameOf(n).includes('aps-checkNested') === false)
-/** The nested 「高级 · 强制屏蔽」 boxes, one per required row. */
-const nestedRowsIn = (tree) => findNodes(tree, (n) => classNameOf(n).includes('aps-checkNested'))
+const mainRowsIn = (tree) => {
+  const field = contextFieldFor(tree)
+  if (field === undefined) return []
+  return findNodes(
+    field,
+    (n) => classNameOf(n) === 'aps-checkRow' && classNameOf(n).includes('aps-checkNested') === false,
+  )
+}
+/** The nested 「高级 · 强制屏蔽」 boxes inside one node. */
+const nestedRowsIn = (node) => findNodes(node, (n) => classNameOf(n).includes('aps-checkNested'))
 const boxOf = (row) => findNodes(row, (n) => n.type === 'input')[0]
 const rowFor = (tree, name) => mainRowsIn(tree).find((r) => textOf(r).includes(name))
 /**
@@ -145,6 +167,7 @@ console.log('# 点击复制：发往 Host 的载荷')
   assert.deepEqual(body.tools, MANAGED.tools, 'tool selection copied')
   // Copied as-is: a managed source yields a managed copy, whitelist included.
   assert.deepEqual(body.contexts, MANAGED.contexts, 'the snapshot whitelist is copied verbatim')
+  assert.deepEqual(body.injectionBlocks, MANAGED.injectionBlocks, 'the injection tag list is copied verbatim')
   assert(!('requiredSuppressed' in body), 'an un-forced source copies without the advanced field')
   assert(noticesIn(after).some((text) => text.includes('已复制为 审查（复制 2）')), `notice reports the new name: ${noticesIn(after).join(' / ')}`)
   // Duplicate is NOT an edit: the page stays on the list, no editor opens.
@@ -194,9 +217,10 @@ const openEditor = async (studio, tree, cardIndex = 0) => {
   const heads = findNodes(tree, (n) => classNameOf(n) === 'aps-groupHead').map(textOf)
   const order = heads.indexOf('提示词')
   assert(order >= 0, `提示词 group found: ${heads.join(' / ')}`)
-  assert(heads.includes('运行时上下文'), `snapshot group rendered between prompt and skills: ${heads.join(' / ')}`)
-  assert(heads.indexOf('运行时上下文') === order + 1, 'group sits directly after 提示词')
-  assert(heads.indexOf('技能') > heads.indexOf('运行时上下文'), '…and before 技能')
+  assert(heads.includes('上下文注入'), `injection group rendered between prompt and snapshot: ${heads.join(' / ')}`)
+  assert(heads.indexOf('上下文注入') === order + 1, 'injection group sits directly after 提示词')
+  assert(heads.indexOf('runtime-context 注入') === order + 2, '…and the runtime-context group follows it')
+  assert(heads.indexOf('技能') > heads.indexOf('runtime-context 注入'), '…and both stay before 技能')
 
   // One row per catalog entry, with label + technical name + description.
   const rows = mainRowsIn(tree)
@@ -271,7 +295,8 @@ console.log('# 勾选变化 → 保存载荷')
   assert(!('requiredSuppressed' in body), 'the advanced list stays absent when nothing was forced')
   // 取消全选 moves the optional rows and never the required ones.
   const after = await openEditor(studio, await studio.root.settle(), 0)
-  await labelled(after, '取消全选')[0].props.onClick()
+  const clearAll = findNodes(contextFieldFor(after), (n) => n.type === 'button' && textOf(n) === '取消全选')[0]
+  await clearAll.props.onClick()
   const cleared = await studio.root.flush()
   assert.equal(boxOf(rowFor(cleared, 'sandbox:policy')).props.checked, false, 'clear-all unchecks the optional rows')
   assert.equal(boxOf(rowFor(cleared, 'working-directory:current')).props.checked, true, 'clear-all keeps required rows injecting')
@@ -451,9 +476,9 @@ console.log('# 旧 Host 降级（Host 进程仍是安装前的代码）')
   const tree = await openEditor(studio, await studio.root.settle(), 0)
   assert(findNodes(tree, (n) => classNameOf(n) === 'aps-checkRow').length === 0, 'no rows without a catalog')
   assert(textOf(tree).includes('当前没有可勾选的快照上下文项'), 'empty-state hint shown')
-  assert(findNodes(tree, (n) => classNameOf(n) === 'aps-groupHead').map(textOf).includes('运行时上下文'), 'the group is still there')
+  assert(findNodes(tree, (n) => classNameOf(n) === 'aps-groupHead').map(textOf).includes('runtime-context 注入'), 'the group is still there')
   // Only this group's own header row: the skills header legitimately counts.
-  const contextHeadRow = findNodes(tree, (n) => classNameOf(n) === 'aps-groupHeadRow' && textOf(n).includes('运行时上下文'))[0]
+  const contextHeadRow = findNodes(tree, (n) => classNameOf(n) === 'aps-groupHeadRow' && textOf(n).includes('runtime-context 注入'))[0]
   assert(contextHeadRow !== undefined, 'the group header row rendered')
   assert(!textOf(contextHeadRow).includes('已选'), `no false checked-count: ${textOf(contextHeadRow)}`)
   const facts = findNodes(tree, (n) => classNameOf(n) === 'aps-fact').map(textOf)

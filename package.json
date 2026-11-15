@@ -1,6 +1,6 @@
 {
   "name": "dsh-my-agent-preset",
-  "version": "2.7.5",
+  "version": "2.8.0",
   "author": {
   "name": "zkbnfcnb",
   "email": "2104587592@qq.com"
@@ -22,12 +22,12 @@
 },
 "repository": "github:Zkbnfcnb/dsh-my-agent-preset",
   "type": "module",
-  "description": "Manage custom Agent presets from DSH Settings: persona prompt, a per-preset prompt-section checklist, runtime-context snapshot selection (with an opt-in override for DSH-required contributions), per-preset injected skills and tool scope.",
+  "description": "Manage custom Agent presets from DSH Settings: persona prompt, a per-preset prompt-section checklist, runtime-context injection selection, tag-based blocking of whole context-injection sources, an item checklist (with an opt-in override for DSH-required contributions), per-preset injected skills and tool scope.",
   "main": "index.js",
   "icon": "./icon.svg",
   "meta": {
     "title": "自定义预设模式",
-    "description": "新增、编辑、复制与删除自定义 Agent 预设模式，并管理其提示词、运行时上下文、技能与工具。"
+    "description": "新增、编辑、复制与删除自定义 Agent 预设模式，并管理其提示词、runtime-context 注入、上下文注入 tag、技能与工具。"
   },
   "exports": {
     ".": "./index.js",

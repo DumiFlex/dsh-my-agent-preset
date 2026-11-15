@@ -26,6 +26,7 @@ const PRESETS = [
     description: '拆解复杂任务。',
     instructions: '你是编排者。',
     instructionMode: 'complete',
+    injectionBlocks: ['time-context', 'runtime-context'],
     contexts: ['dsh-working-directory'],
     requiredSuppressed: [],
     sections: ['harness:identity'],
@@ -106,6 +107,7 @@ console.log('# 导出到本地：完整预设信息')
       payload?.[0]?.instructionMode === 'complete' &&
       JSON.stringify(payload?.[0]?.skills) === JSON.stringify(['pdf', 'univer']) &&
       payload?.[0]?.tools?.mode === 'allow' &&
+      JSON.stringify(payload?.[0]?.injectionBlocks) === JSON.stringify(['time-context', 'runtime-context']) &&
       JSON.stringify(payload?.[0]?.contexts) === JSON.stringify(['dsh-working-directory']) &&
       JSON.stringify(payload?.[0]?.sections) === JSON.stringify(['harness:identity']) &&
       JSON.stringify(payload?.[0]?.sectionsSuppressed) === JSON.stringify(['deployment:persona-prefix']) &&
@@ -140,6 +142,7 @@ console.log('# 导入：文件选择 → 同名自动重命名 → 追加到末�
       instructionMode: 'complete',
       skills: ['pdf'],
       tools: { mode: 'allow', names: ['bash'] },
+      injectionBlocks: ['plugin:trilogy'],
       contexts: [],
       sections: ['harness:identity'],
       sectionsSuppressed: ['deployment:persona-prefix'],
@@ -182,11 +185,12 @@ console.log('# 导入：文件选择 → 同名自动重命名 → 追加到末�
     JSON.stringify(saves.map((call) => call.body.order)),
   )
   check(
-    '完整导入提示词、技能、工具、上下文、段清单与开关',
+    '完整导入提示词、技能、工具、注入来源、上下文、段清单与开关',
     saves[0]?.body.instructions === '导入的提示词。' &&
       saves[0]?.body.instructionMode === 'complete' &&
       JSON.stringify(saves[0]?.body.skills) === JSON.stringify(['pdf']) &&
       saves[0]?.body.tools?.mode === 'allow' &&
+      JSON.stringify(saves[0]?.body.injectionBlocks) === JSON.stringify(['plugin:trilogy']) &&
       JSON.stringify(saves[0]?.body.contexts) === JSON.stringify([]) &&
       JSON.stringify(saves[0]?.body.sections) === JSON.stringify(['harness:identity']) &&
       JSON.stringify(saves[0]?.body.sectionsSuppressed) === JSON.stringify(['deployment:persona-prefix']) &&

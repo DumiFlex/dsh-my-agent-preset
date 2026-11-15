@@ -53,9 +53,11 @@ const KEPT = ['sandbox:policy', 'approval:policy', 'harness:source']
  * context globally, mount one preset with a whitelist, join one Agent to its
  * scope, and fire the refresh that installs the Agent's scope.
  * @param contexts - the stored whitelist, or undefined for an unmanaged preset.
+ * @param forced - the advanced required-suppression list.
+ * @param injectionBlocks - the stored injection-source BLOCK list, or undefined.
  * @returns `{ agent, assemble, names, dispose }`.
  */
-async function boot(contexts, forced) {
+async function boot(contexts, forced, injectionBlocks) {
   const dir = await mkdtemp(join(tmpdir(), 'aps-contexts-'))
   const dataFile = join(dir, 'presets.json')
   const preset = {
@@ -66,6 +68,7 @@ async function boot(contexts, forced) {
     skills: [],
     ...(contexts === undefined ? {} : { contexts }),
     ...(forced === undefined ? {} : { requiredSuppressed: forced }),
+    ...(injectionBlocks === undefined ? {} : { injectionBlocks }),
   }
   await writeFile(dataFile, JSON.stringify({ version: 2, presets: [preset] }), 'utf8')
 
@@ -158,6 +161,34 @@ async function boot(contexts, forced) {
 }
 
 const namesOf = (assembly) => assembly.contexts.map((entry) => entry.name)
+
+console.log('# runtime-context 总开关（runtime-context tag 屏蔽整段快照）')
+{
+  // A block list CONTAINING 'runtime-context' must drop every contribution —
+  // required rows included — both on assemble and on the per-step refresh.
+  // This is the assemble-side half of the injection tags; the pre-step half
+  // only owns the other sources.
+  const bundle = await boot(undefined, undefined, ['runtime-context'])
+  try {
+    const assembly = await bundle.assemble()
+    assert.deepEqual(namesOf(assembly), [], 'muted runtime-context: nothing reaches the assembly')
+    const refreshed = bundle.systemPrompt.refreshContext(assembly, { agent: bundle.agent, scope: bundle.agent })
+    assert.deepEqual(namesOf(refreshed), [], 'muted runtime-context: refreshContext restores nothing')
+    // Sections are a different field and stay untouched.
+    assert(Array.isArray(assembly.sections) && assembly.sections.length > 0, 'sections untouched')
+  } finally {
+    await bundle.dispose()
+  }
+  // A tag that is NOT runtime-context blocks only that message source; the
+  // snapshot keeps every contribution.
+  const partial = await boot(undefined, undefined, ['time-context'])
+  try {
+    const assembly = await partial.assemble()
+    assert(namesOf(assembly).length > 0, 'a block list without runtime-context leaves the snapshot alone')
+  } finally {
+    await partial.dispose()
+  }
+}
 
 console.log('# 运行时过滤（真实 SystemPrompt 组装）')
 {

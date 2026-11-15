@@ -109,7 +109,7 @@ const rowsIn = (field) => {
 }
 
 const sectionRows = (tree) => rowsIn(fieldFor(tree, '注入的提示词段'))
-const contextRows = (tree) => rowsIn(fieldFor(tree, '注入的快照项'))
+const contextRows = (tree) => rowsIn(fieldFor(tree, '注入的 runtime-context 项'))
 const checkedRows = (rows) => rows.filter((row) => row.checked === true).map((row) => row.text).sort()
 
 console.log('# 未管理的清单保存后仍是未管理')

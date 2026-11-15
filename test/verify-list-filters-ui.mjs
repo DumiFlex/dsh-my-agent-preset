@@ -24,7 +24,7 @@ import assert from 'node:assert/strict'
 import { classNameOf, findNodes, mountStudio, textOf } from './_studio-harness.mjs'
 
 const SECTION_LABEL = '注入的提示词段'
-const CONTEXT_LABEL = '注入的快照项'
+const CONTEXT_LABEL = '注入的 runtime-context 项'
 
 /** A managed preset: some optional contexts off, the rest checked. */
 const PRESET = {

@@ -29,6 +29,12 @@ window.__ModuleLoader__.load({
 
     /** Settings page API prefix served by the Host half. */
     const API_PREFIX = '/api/dsh-my-agent-preset'
+    /**
+     * DSH's own runtime-context message kind. It is a protocol constant, not a
+     * catalog entry: a tag with this kind owns the item checklist below, and
+     * the Host enforces the whole-snapshot mute on the assemble side.
+     */
+    const RUNTIME_CONTEXT_KIND = 'runtime-context'
     /** Dictionary namespace owned by this plugin. */
     const LOCALE_NS = 'settings.myAgentPreset'
 
@@ -87,6 +93,19 @@ window.__ModuleLoader__.load({
 .aps-segItem{appearance:none;border:0;background:0 0;font:inherit;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary);border-radius:var(--dsw-radius-sm);padding:4px 12px;cursor:pointer}
 .aps-segItem[aria-pressed='true']{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-weight:500}
 .aps-segItem:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+/* Context-injection tags: free-form source.kind names, one removable pill each.
+   The mono font says "this is a protocol identifier", not a prose label. */
+.aps-tagField{display:flex;flex-direction:column;gap:8px}
+.aps-tagList{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+.aps-tag{display:inline-flex;align-items:center;gap:4px;border:.5px solid var(--dsw-alias-border-l4);border-radius:999px;background:var(--dsw-alias-bg-layer-3);padding:2px 4px 2px 10px;font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary)}
+.aps-tagLabel{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aps-tagRemove{appearance:none;border:0;background:0 0;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:14px;line-height:1;padding:2px 4px;border-radius:999px;cursor:pointer}
+.aps-tagRemove:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-error-primary)}
+.aps-tagRemove:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.aps-tagAddRow{display:flex;align-items:center;gap:8px}
+.aps-tagAddRow .aps-tagInput{flex:1;min-width:0;font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace)}
+.aps-tagAddRow .aps-btn{flex:none;white-space:nowrap}
+.aps-tagField .aps-hint,.aps-tagField .aps-error{margin:0}
 .aps-filter{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
 .aps-toolFilter,.aps-sectionFilter,.aps-contextFilter{margin-top:10px}
 .aps-input[type='search']{-webkit-appearance:none;appearance:none}
@@ -145,7 +164,7 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: '自定义预设模式',
       title: '自定义预设模式',
-      description: '新增、编辑、复制与删除自定义 Agent 预设模式，并管理其提示词、运行时上下文、技能与工具。',
+      description: '新增、编辑、复制与删除自定义 Agent 预设模式，并管理其提示词、runtime-context 注入、技能与工具。',
       create: '新建预设模式',
       createTitle: '新建预设模式',
       exportList: '导出预设列表',
@@ -187,14 +206,29 @@ window.__ModuleLoader__.load({
       modeAppendHint: '只用这段文字替换人设前缀，保留 DSH 其它系统提示词（工具指导等）。',
       modeCompleteHint: '只使用这段文字，移除所有其它系统提示词（含第三方插件注入）。',
       modeCustomHint: '只用这段文字作为人设，并按下方勾选决定注入哪些提示词段：勾选 = 保留，未勾选 = 屏蔽。DSH 官方段不再默认屏蔽，预设自身的人设段始终保留。',
-      groupContexts: '运行时上下文',
-      contexts: '注入的快照项',
-      contextsHint: '逐项勾选每轮注入的「Current runtime context」快照里允许出现哪些上下文；未勾选的项对该预设不再注入。标记「必需 · 不可关闭」的项由官方强制注入，无法关闭。',
+      groupInjections: '上下文注入',
+      injections: '屏蔽的注入来源',
+      injectionsHint:
+        '用 tag 声明要屏蔽的注入来源（source.kind）：tag 列表里的来源不再进入模型上下文，未列出的来源一律放行。手动输入来源名称后回车或点「添加」，例如 context-pilot、runtime-context；删除 tag 即恢复注入。该模块只决定整段注入是否出现，下方 runtime-context 条目清单决定快照里保留哪些条目。',
+      injectionsRuntimeMutedHint:
+        'tag 列表包含 runtime-context：整段快照会被移除，下方条目清单不再生效。曾注入过快照的会话里，DSH 仍可能写一条固定的「Current runtime context: none」说明——它不含任何环境信息。',
+      injectionTagPlaceholder: '输入 source.kind，例如 context-pilot',
+      injectionTagCount: '屏蔽 {count} 个来源',
+      injectionTagAdd: '添加',
+      injectionTagRemove: '移除 {kind}',
+      injectionTagEmpty: '还没有添加 tag：所有注入来源都会放行。',
+      injectionTagHint: '回车添加；输入框为空时按退格删除最后一个 tag。',
+      injectionTagUserBlocked: 'user 是真实用户输入，不能屏蔽。',
+      injectionTagDuplicate: '该来源已在屏蔽列表中。',
+      injectionTagInvalid: '来源名称不能为空。',
+      groupContexts: 'runtime-context 注入',
+      contexts: '注入的 runtime-context 项',
+      contextsHint: '逐项勾选每轮注入的 runtime-context（`Current runtime context` 环境快照）里允许出现哪些条目；未勾选的项对该预设不再注入。标记「必需 · 不可关闭」的项由官方强制注入，无法关闭。',
       contextsRequiredTag: '必需 · 不可关闭',
       contextsForcedTag: '已被本预设强制屏蔽',
       contextsForceUnavailable: '此 Host 不支持强制屏蔽（该项仍会注入）',
       contextsForceLabel: '高级 · 强制屏蔽这一项（官方本不允许）',
-      contextsForceWarn: '官方在三层机制里强制注入这一项。本插件用两个依赖实现细节的手段对抗它——同名覆盖 + 更外层过滤——DSH 升级可能让它悄悄失效且不报错。屏蔽「当前工作区」后模型将不知道自己在哪个目录，可能猜错路径；确认要这样吗？',
+      contextsForceWarn: '官方在三层机制里强制注入这一项。本插件用两个依赖实现细节的手段对抗它——同名覆盖 + 更外层过滤——DSH 升级可能让它悄悄失效且不报错。',
       contextsForeignTag: '第三方',
       contextsRuntimeRequiredTag: '运行时必需',
       contextsNameSeparator: '、',
@@ -225,6 +259,10 @@ window.__ModuleLoader__.load({
       inspectContextsUnmanaged: '该预设未管理快照（全部注入）',
       inspectContextsList: '保留的快照上下文（{count}）',
       inspectContextsBlockedList: '被屏蔽的快照上下文（{count}）',
+      inspectInjections: '屏蔽的上下文注入来源 {count} 项',
+      inspectInjectionsNone: '该预设没有屏蔽任何上下文注入来源（全部放行）',
+      inspectInjectionsUnmanaged: '该预设未管理上下文注入来源（全部放行）',
+      inspectInjectionsList: '屏蔽的上下文注入来源（{count}）',
       groupSkills: '技能',
       skills: '注入的技能',
       skillsHint: '技能白名单：只有勾选的技能进入该预设的 Skill 目录并可被调用；未勾选的技能对该预设的模型不可见。什么都不勾选 = 该预设没有任何技能。',
@@ -309,7 +347,7 @@ window.__ModuleLoader__.load({
     const en = {
       nav: 'Custom Presets',
       title: 'Custom Presets',
-      description: 'Create, edit, duplicate and delete custom Agent presets and manage their prompt, runtime context, skills and tools.',
+      description: 'Create, edit, duplicate and delete custom Agent presets and manage their prompt, runtime-context injection, skills and tools.',
       create: 'New preset',
       createTitle: 'New preset',
       exportList: 'Export preset list',
@@ -351,14 +389,29 @@ window.__ModuleLoader__.load({
       modeAppendHint: 'Uses this text as the persona prefix (replacing the deployment persona) while keeping the rest of DSH\u2019s system prompt, such as tool guidance.',
       modeCompleteHint: 'Uses only this text, removing every other system-prompt section (including third-party contributions).',
       modeCustomHint: 'Uses this text as the persona and decides which prompt sections are injected from the checklist below: checked = kept, unchecked = blocked. DSH\u2019s own sections are no longer blocked by default; the preset\u2019s own persona sections are always kept.',
-      groupContexts: 'Runtime context',
-      contexts: 'Snapshot contributions',
-      contextsHint: 'Pick which contributions the per-step “Current runtime context” snapshot may carry; unchecked ones stop being injected for this preset. Rows marked “required” are force-injected by DSH itself and cannot be turned off.',
+      groupInjections: 'Context injection',
+      injections: 'Blocked injection sources',
+      injectionsHint:
+        'Use tags to declare the injection sources (\u201csource.kind\u201d) to block: a source whose tag is listed never enters the model context, and every source not listed keeps injecting. Type a source name and press Enter or \u201cAdd\u201d \u2014 for example context-pilot or runtime-context; remove a tag to let it inject again. This layer decides whether whole injected messages appear; the runtime-context item list below decides which items the snapshot carries.',
+      injectionsRuntimeMutedHint:
+        'The tag list contains runtime-context: the whole snapshot is removed and the item list below no longer applies. In a session that already carried a snapshot, DSH may still write one fixed \u201cCurrent runtime context: none\u201d note; it contains no environment facts.',
+      injectionTagPlaceholder: 'Type a source.kind, e.g. context-pilot',
+      injectionTagCount: '{count} sources blocked',
+      injectionTagAdd: 'Add',
+      injectionTagRemove: 'Remove {kind}',
+      injectionTagEmpty: 'No tags yet: every injection source is allowed.',
+      injectionTagHint: 'Press Enter to add; with an empty box, Backspace removes the last tag.',
+      injectionTagUserBlocked: '\u201cuser\u201d is the real user input and cannot be blocked.',
+      injectionTagDuplicate: 'That source is already blocked.',
+      injectionTagInvalid: 'A source name cannot be empty.',
+      groupContexts: 'runtime-context injection',
+      contexts: 'Injected runtime-context items',
+      contextsHint: 'Pick which items the per-turn runtime-context snapshot (\u201cCurrent runtime context\u201d) may carry; unchecked ones stop being injected for this preset. Rows marked \u201crequired\u201d are force-injected by DSH itself and cannot be turned off.',
       contextsRequiredTag: 'required · cannot disable',
       contextsForcedTag: 'force-suppressed by this preset',
       contextsForceUnavailable: 'this Host cannot force-suppress (it still injects)',
       contextsForceLabel: 'Advanced · force-suppress anyway (officially not allowed)',
-      contextsForceWarn: 'DSH force-injects this row at three layers. The plugin fights back with two implementation-detail tricks — a same-name shadow plus an outer filter — which a DSH upgrade can silently void. Suppressing the working directory leaves the model without a sense of where it is and can make it guess wrong paths. Are you sure?',
+      contextsForceWarn: 'DSH force-injects this row at three layers. The plugin fights back with two implementation-detail tricks — a same-name shadow plus an outer filter — which a DSH upgrade can silently void.',
       contextsForeignTag: 'third-party',
       contextsRuntimeRequiredTag: 'runtime-required',
       contextsNameSeparator: ', ',
@@ -389,6 +442,10 @@ window.__ModuleLoader__.load({
       inspectContextsUnmanaged: 'This preset does not manage the snapshot (everything injected)',
       inspectContextsList: 'Snapshot contexts kept ({count})',
       inspectContextsBlockedList: 'Snapshot contexts blocked ({count})',
+      inspectInjections: 'Blocked context-injection sources: {count}',
+      inspectInjectionsNone: 'This preset blocks no context-injection source (all allowed)',
+      inspectInjectionsUnmanaged: 'This preset does not manage context-injection sources (all allowed)',
+      inspectInjectionsList: 'Blocked context-injection sources ({count})',
       groupSkills: 'Skills',
       skills: 'Injected skills',
       skillsHint: 'Skill whitelist: only checked skills enter this preset\u2019s Skill catalog and can be called; unchecked skills are invisible to this preset\u2019s model. Checking nothing = this preset has no skill.',
@@ -550,9 +607,11 @@ window.__ModuleLoader__.load({
         enabled: source.enabled !== false,
       }
       // PRESENT means the array is the whole truth, so an empty array must be
-      // exported as-is (it suppresses every optional context). The same rule
-      // applies to the advanced force-suppress list.
+      // exported as-is. The same rule applies to the advanced force-suppress
+      // list and to the injection block list, where an empty array means
+      // "block no source".
       if (Array.isArray(source.contexts)) portable.contexts = asStringList(source.contexts)
+      if (Array.isArray(source.injectionBlocks)) portable.injectionBlocks = asStringList(source.injectionBlocks)
       if (Array.isArray(source.requiredSuppressed)) portable.requiredSuppressed = asStringList(source.requiredSuppressed)
       if (Array.isArray(source.sections)) portable.sections = asStringList(source.sections)
       if (Array.isArray(source.sectionsSuppressed))
@@ -602,6 +661,7 @@ window.__ModuleLoader__.load({
         enabled: input.enabled !== false,
       }
       if (Array.isArray(input.contexts)) preset.contexts = asStringList(input.contexts)
+      if (Array.isArray(input.injectionBlocks)) preset.injectionBlocks = asStringList(input.injectionBlocks)
       if (Array.isArray(input.requiredSuppressed)) preset.requiredSuppressed = asStringList(input.requiredSuppressed)
       if (Array.isArray(input.sections)) preset.sections = asStringList(input.sections)
       if (Array.isArray(input.sectionsSuppressed)) preset.sectionsSuppressed = asStringList(input.sectionsSuppressed)
@@ -774,6 +834,10 @@ window.__ModuleLoader__.load({
         // runtime behaving as it does today. Only an edit of this area turns it
         // into an array, and an array is then the strict whitelist.
         contexts: undefined,
+        // LEFT UNDEFINED for the same reason: absent = this preset blocks no
+        // injection source, so every source injects and the editor shows an
+        // empty tag list. The first added tag writes the block list.
+        injectionBlocks: undefined,
         // LEFT UNDEFINED for the same reason: absent = this preset does not
         // manage prompt sections, so every section injects and the editor shows
         // the fully-checked list. Only editing this area turns it into an array.
@@ -1412,6 +1476,21 @@ window.__ModuleLoader__.load({
                         format(t('inspectContextsBlocked'), { count: view.blockedContexts.length }),
                       )
                     : null,
+                  // The injection-source partition: whole messages, separate
+                  // from the snapshot items above. The block list IS what the
+                  // user tagged, so the panel shows those exact tags — no
+                  // runtime observation is claimed.
+                  view.injectionFilter === undefined
+                    ? null
+                    : view.injectionFilter.managed === false
+                      ? h('span', { className: 'aps-fact' }, t('inspectInjectionsUnmanaged'))
+                      : (view.injectionFilter.blocked ?? []).length === 0
+                        ? h('span', { className: 'aps-fact' }, t('inspectInjectionsNone'))
+                        : h(
+                            'span',
+                            { className: 'aps-fact' },
+                            format(t('inspectInjections'), { count: view.injectionFilter.blocked.length }),
+                          ),
                   (view.tools ?? []).length === 0 ? h('p', { className: 'aps-hint' }, t('inspectEmpty')) : null,
                   view.skillsToolAvailable === false && (view.skills ?? []).length === 0
                     ? h('p', { className: 'aps-hint' }, t('inspectSkillsOff'))
@@ -1495,6 +1574,15 @@ window.__ModuleLoader__.load({
                   forced: view.forcedContexts ?? [],
                   t,
                 }),
+                // The whole-message injection partition. Source kinds ARE the
+                // display names — they are exactly the tags the user typed, so
+                // a third-party kind reads as its raw `source.kind`.
+                view.injectionFilter?.managed === true && (view.injectionFilter.blocked ?? []).length > 0
+                  ? h(NameList, {
+                      title: t('inspectInjectionsList'),
+                      names: view.injectionFilter.blocked ?? [],
+                    })
+                  : null,
               ),
       )
     }
@@ -1853,6 +1941,113 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The context-injection TAG editor — free-form `source.kind` names the
+     * user types to BLOCK.
+     *
+     * A different layer from {@link ContextPicker}: those rows are the items
+     * INSIDE the runtime-context snapshot, while these are whole messages a
+     * plugin injected before a step. There is no catalog and no runtime
+     * observation: the user adds a tag for every source to suppress, and every
+     * source WITHOUT a tag keeps injecting. `runtime-context` is an ordinary
+     * tag whose consequence (the whole snapshot disappears) the caller spells
+     * out below the editor.
+     *
+     * Tags are free-form on purpose: `source.kind` is a protocol string whose
+     * set is decided by whichever plugins are installed, so a fixed list would
+     * be wrong the moment a third-party injector appears. A name that matches
+     * nothing is harmless — it just blocks nothing.
+     * @param props - `{ t, blocks, onChange }`.
+     * @returns the tag editor element.
+     */
+    function InjectionTags(props) {
+      const t = props.t
+      const blocks = Array.isArray(props.blocks) ? props.blocks : []
+      const [value, setValue] = useState('')
+      const [error, setError] = useState('')
+      const add = () => {
+        const kind = value.trim()
+        if (kind === '') {
+          setError(t('injectionTagInvalid'))
+          return
+        }
+        // The real user input is never an injection source; blocking it would
+        // look like it worked while pre-step keeps passing it.
+        if (kind === 'user') {
+          setError(t('injectionTagUserBlocked'))
+          return
+        }
+        if (blocks.includes(kind)) {
+          setError(t('injectionTagDuplicate'))
+          return
+        }
+        setValue('')
+        setError('')
+        props.onChange([...blocks, kind])
+      }
+      const remove = (kind) => props.onChange(blocks.filter((entry) => entry !== kind))
+      const input = h('input', {
+        className: 'aps-input aps-tagInput',
+        type: 'text',
+        value,
+        placeholder: t('injectionTagPlaceholder'),
+        'aria-label': t('injectionTagPlaceholder'),
+        onChange: (event) => {
+          setValue(event.target.value)
+          setError('')
+        },
+        onKeyDown: (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            add()
+            return
+          }
+          // Empty box + Backspace removes the LAST tag, the usual tag-editor
+          // convention; with text in the box the key edits the box itself.
+          if (event.key === 'Backspace' && value === '' && blocks.length > 0) {
+            event.preventDefault()
+            remove(blocks[blocks.length - 1])
+          }
+        },
+      })
+      return h(
+        'div',
+        { className: 'aps-tagField' },
+        blocks.length === 0
+          ? h('p', { className: 'aps-hint' }, t('injectionTagEmpty'))
+          : h(
+              'ul',
+              { className: 'aps-tagList' },
+              blocks.map((kind) =>
+                h(
+                  'li',
+                  { key: kind, className: 'aps-tag' },
+                  h('span', { className: 'aps-tagLabel' }, kind),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'aps-tagRemove',
+                      title: format(t('injectionTagRemove'), { kind }),
+                      'aria-label': format(t('injectionTagRemove'), { kind }),
+                      onClick: () => remove(kind),
+                    },
+                    '\u00d7',
+                  ),
+                ),
+              ),
+            ),
+        h(
+          'div',
+          { className: 'aps-tagAddRow' },
+          input,
+          h('button', { type: 'button', className: 'aps-btn', onClick: add }, t('injectionTagAdd')),
+        ),
+        error === '' ? null : h('p', { className: 'aps-error' }, error),
+        h('p', { className: 'aps-hint' }, t('injectionTagHint')),
+      )
+    }
+
+    /**
      * The optional-only whitelist a draft should persist.
      *
      * Required names are written to neither half unless they are forced, so the
@@ -2136,6 +2331,16 @@ window.__ModuleLoader__.load({
       const sectionCatalog = meta.sectionCatalog ?? []
       const sectionState = sectionSelectionState(draft, sectionCatalog)
       const checkedSections = sectionState.checked
+      // --- the context-injection tag list ------------------------------------
+      // The array is a BLOCK list of free-form `source.kind` tags: a listed
+      // source is suppressed, every source outside the list injects. An absent
+      // field (a preset that never touched this group) shows an empty list and
+      // behaves exactly like an empty array. A `runtime-context` tag disables
+      // the item list below, because the whole snapshot is gone at that point.
+      const injectionBlocks = Array.isArray(draft.injectionBlocks) ? draft.injectionBlocks : []
+      const injectionSupported = (meta.capabilities ?? []).includes('injectionBlocks')
+      const runtimeContextMuted = injectionBlocks.includes(RUNTIME_CONTEXT_KIND)
+      const setInjectionBlocks = (next) => patch({ injectionBlocks: [...new Set(next)] })
       // Only the optional half is written to `sections`: a required name parked
       // there would be a dead entry, since its removal is decided by the
       // advanced list alone. That also keeps 全选 / 取消全选 honest.
@@ -2221,6 +2426,9 @@ window.__ModuleLoader__.load({
               skills: draft.skills ?? [],
               contexts: contextState.checked,
               requiredSuppressed: contextState.forced,
+              // `null` is explicit for the injection block list too: a draft
+              // that blocks no source must not fall back to the stored list.
+              injectionBlocks: Array.isArray(draft.injectionBlocks) ? draft.injectionBlocks : null,
               // `null` is explicit: the draft does not manage sections, and
               // must NOT fall back to the stored list inside the Host.
               sections: Array.isArray(draft.sections) ? sectionWhitelistOf(draft, sectionCatalog) : null,
@@ -2244,7 +2452,13 @@ window.__ModuleLoader__.load({
       // hint. The snapshot and section parts of the key use the DERIVED checked
       // names, the same lists `runInspect` sends, so an unmanaged → managed
       // transition and every individual toggle both re-read exactly once.
-      const inspectKey = `${draft.id}\u0000${selection.mode}\u0000${selection.names.join(',')}\u0000${(draft.skills ?? []).join(',')}\u0000${checkedContexts.join(',')}\u0000${contextState.forced.join(',')}\u0000${draft.instructionMode}\u0000${checkedSections.join(',')}\u0000${sectionState.forced.join(',')}`
+      // The injection tag list is part of the key too: adding or removing a
+      // tag changes the injection partition and, for runtime-context, the
+      // whole snapshot partition — the panel must follow that immediately.
+      const injectionKey = Array.isArray(draft.injectionBlocks)
+        ? draft.injectionBlocks.join(',')
+        : '\u0001unmanaged'
+      const inspectKey = `${draft.id}\u0000${selection.mode}\u0000${selection.names.join(',')}\u0000${(draft.skills ?? []).join(',')}\u0000${injectionKey}\u0000${checkedContexts.join(',')}\u0000${contextState.forced.join(',')}\u0000${draft.instructionMode}\u0000${checkedSections.join(',')}\u0000${sectionState.forced.join(',')}`
       useEffect(() => {
         if (draft.id === '') {
           setView(null)
@@ -2382,6 +2596,41 @@ window.__ModuleLoader__.load({
             ),
           ),
         ),
+        // The injection-source tags come BEFORE the snapshot item list: a
+        // listed source is suppressed, and a `runtime-context` tag makes the
+        // item list below moot. Same group and panel classes as every other
+        // area, so the page reads as one form.
+        injectionSupported
+          ? h(
+              'div',
+              { className: 'aps-group' },
+              h(
+                'div',
+                { className: 'aps-groupHeadRow' },
+                h('h3', { className: 'aps-groupHead' }, t('groupInjections')),
+                injectionBlocks.length === 0
+                  ? null
+                  : h(
+                      'span',
+                      { className: 'aps-hint' },
+                      format(t('injectionTagCount'), { count: injectionBlocks.length }),
+                    ),
+              ),
+              h(
+                'div',
+                { className: 'aps-cardPanel' },
+                h(
+                  Field,
+                  { label: t('injections'), hint: t('injectionsHint') },
+                  h(InjectionTags, {
+                    t,
+                    blocks: injectionBlocks,
+                    onChange: setInjectionBlocks,
+                  }),
+                ),
+              ),
+            )
+          : null,
         // Between the prompt and the skills: the snapshot is a prompt-layer
         // contribution (it is injected as a message, not a section), so it
         // follows the prompt group, but it is selected item-by-item like the
@@ -2407,6 +2656,13 @@ window.__ModuleLoader__.load({
             h(
               Field,
               { label: t('contexts'), hint: t('contextsHint') },
+              runtimeContextMuted
+                ? h(
+                    'div',
+                    { className: 'aps-warnBlock' },
+                    h('div', { className: 'aps-warnTitle' }, t('injectionsRuntimeMutedHint')),
+                  )
+                : null,
               h(ContextPicker, {
                 t,
                 rows: contextCatalog,
@@ -2726,10 +2982,14 @@ window.__ModuleLoader__.load({
             instructions: preset.instructions ?? '',
             instructionMode: preset.instructionMode ?? 'append',
             // Copied as-is, array or absence: an unmanaged source yields an
-            // unmanaged copy, a managed one keeps its exact whitelist. The
-            // advanced force-suppress list rides along for the same reason — a
-            // duplicate is a copy, not a fresh default.
+            // unmanaged copy, a blocked one keeps its exact tag list. The
+            // advanced force-suppress list and the injection block list ride
+            // along for the same reason — a duplicate is a copy, not a fresh
+            // default.
             contexts: Array.isArray(preset.contexts) ? [...preset.contexts] : preset.contexts,
+            injectionBlocks: Array.isArray(preset.injectionBlocks)
+              ? [...preset.injectionBlocks]
+              : preset.injectionBlocks,
             requiredSuppressed: Array.isArray(preset.requiredSuppressed)
               ? [...preset.requiredSuppressed]
               : preset.requiredSuppressed,
