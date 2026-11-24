@@ -17,7 +17,7 @@
  */
 import { readFileSync } from 'node:fs'
 
-const SOURCE = new URL('../client.js', import.meta.url).pathname
+const SOURCE = new URL('../client.js', import.meta.url)
 
 /** Let queued microtasks (an awaited click handler) settle. */
 export const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -242,6 +242,7 @@ export const classNameOf = (node) => String(node?.props?.className ?? '')
  *   the dictionaries the bundle registered.
  */
 export function mountStudio({
+  language = 'zh',
   presets = [],
   meta = { registryAvailable: true },
   inspectView = { available: true },
@@ -383,7 +384,7 @@ export function mountStudio({
         zh = dicts.zh
         en = dicts.en
       },
-      bind: () => (key) => zh?.[key] ?? key,
+      bind: () => (key) => (language === 'en' ? en : zh)?.[key] ?? key,
     },
     logger: { warn: () => {} },
     slots: {
