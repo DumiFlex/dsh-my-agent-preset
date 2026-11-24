@@ -26,8 +26,8 @@
   "main": "index.js",
   "icon": "./icon.svg",
   "meta": {
-    "title": "自定义预设模式",
-    "description": "新增、编辑、复制与删除自定义 Agent 预设模式，并管理其提示词、runtime-context 注入、上下文注入 tag、技能与工具。"
+    "title": "Custom Preset Studio",
+    "description": "Create, edit, duplicate and delete custom Agent presets and manage their prompt, runtime-context injection, context-injection tags, skills and tools."
   },
   "exports": {
     ".": "./index.js",

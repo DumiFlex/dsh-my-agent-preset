@@ -162,6 +162,37 @@ window.__ModuleLoader__.load({
 
     /** Chinese dictionary. */
     const zh = {
+      presetCopyName: "{name}（复制 {index}）",
+      presetImportName: "{name}（导入 {index}）",
+      requestTooLarge: "请求体过大",
+      presetNameRequired: "预设名称不能为空",
+      invalidPreset: "预设数据无效",
+      presetNotFound: "未找到该预设模式",
+      localAccessOnly: "仅允许本地回环访问",
+      methodNotAllowed: "不支持的请求方法",
+      runtimeRegistryUnavailable: "agentPresets 服务不可用",
+      workspacePlaceholder: "<工作区>",
+      skillGroupProjectDsh: "项目 DSH 技能",
+      skillGroupProjectAgents: "项目 Agent 技能",
+      skillGroupUserDsh: "DSH 技能",
+      skillGroupUserAgents: "公共 Agent 技能",
+      skillGroupRuntime: "运行时注册",
+      skillGroupCustom: "自定义",
+      skillGroupBundled: "内置捆绑",
+      contextWorkspaceLabel: "当前工作区",
+      contextWorkspaceDescription: "会话当前的工作目录（工作目录变更也会体现在这里）。",
+      contextSandboxLabel: "沙箱策略",
+      contextSandboxDescription: "本会话的文件沙箱模式（受限写入 / 完全访问等）。",
+      contextApprovalLabel: "审批策略",
+      contextApprovalDescription: "当前是否需要人工审批操作的提示语。",
+      contextDelegationLabel: "子 Agent 委派说明",
+      contextDelegationDescription: "仅在该 Agent 是被委派的子 Agent 时才有内容。",
+      contextTeamLabel: "团队身份",
+      contextTeamDescription: "仅在加入 Agent 团队时才有内容，且官方标记为必需。",
+      contextSourceLabel: "Harness 实现检出路径",
+      contextSourceDescription: "当前 DSH 实现的检出目录。",
+      contextWebLabel: "Web GUI 地址",
+      contextWebDescription: "当前 DeepSeek Harness Web GUI 的 URL。",
       nav: '自定义预设模式',
       title: '自定义预设模式',
       description: '新增、编辑、复制与删除自定义 Agent 预设模式，并管理其提示词、runtime-context 注入、技能与工具。',
@@ -345,6 +376,37 @@ window.__ModuleLoader__.load({
 
     /** English dictionary. */
     const en = {
+      presetCopyName: "{name} (Copy {index})",
+      presetImportName: "{name} (Import {index})",
+      requestTooLarge: "Request body is too large.",
+      presetNameRequired: "Enter a preset name.",
+      invalidPreset: "The preset data is invalid.",
+      presetNotFound: "Preset not found.",
+      localAccessOnly: "Only local loopback access is allowed.",
+      methodNotAllowed: "Request method not supported.",
+      runtimeRegistryUnavailable: "The agent preset registry is unavailable.",
+      workspacePlaceholder: "<workspace>",
+      skillGroupProjectDsh: "Project DSH skills",
+      skillGroupProjectAgents: "Project agent skills",
+      skillGroupUserDsh: "User DSH skills",
+      skillGroupUserAgents: "Shared agent skills",
+      skillGroupRuntime: "Registered at runtime",
+      skillGroupCustom: "Custom",
+      skillGroupBundled: "Bundled",
+      contextWorkspaceLabel: "Current workspace",
+      contextWorkspaceDescription: "The session’s current working directory, including any changes during the session.",
+      contextSandboxLabel: "Sandbox policy",
+      contextSandboxDescription: "The session’s filesystem sandbox mode, such as restricted writes or full access.",
+      contextApprovalLabel: "Approval policy",
+      contextApprovalDescription: "Whether the session currently requires user approval for actions.",
+      contextDelegationLabel: "Subagent delegation",
+      contextDelegationDescription: "Available when this agent is a delegated subagent.",
+      contextTeamLabel: "Team identity",
+      contextTeamDescription: "Available when the agent joins a team. DSH marks this item as required.",
+      contextSourceLabel: "Harness checkout path",
+      contextSourceDescription: "The checkout directory for this DSH implementation.",
+      contextWebLabel: "Web UI address",
+      contextWebDescription: "The URL of the current DeepSeek Harness Web UI.",
       nav: 'Custom Presets',
       title: 'Custom Presets',
       description: 'Create, edit, duplicate and delete custom Agent presets and manage their prompt, runtime-context injection, skills and tools.',
@@ -747,7 +809,8 @@ window.__ModuleLoader__.load({
     }
 
     /** Bound dictionary resolver; `apply` rebinds it to the locale service. */
-    let T = (key) => zh[key] ?? key
+    const english = (key) => en[key] ?? key
+    let T = english
 
     /** Replace `{name}` placeholders in a template. */
     function format(template, params) {
@@ -770,7 +833,9 @@ window.__ModuleLoader__.load({
         throw new Error(`HTTP ${response.status}`)
       }
       if (payload === null || typeof payload !== 'object' || payload.ok !== true) {
-        throw new Error(payload?.error?.message ?? `HTTP ${response.status}`)
+        const error = payload?.error
+        const detail = Object.hasOwn(en, error?.localeKey) ? T(error.localeKey) : error?.message
+        throw new Error(detail ?? `HTTP ${response.status}`)
       }
       return payload.value
     }
@@ -849,37 +914,41 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /**
-     * The name a copy of `source` should take, given every existing name.
-     *
-     * One unified rule, whatever the source is already called: `（复制 N）`,
-     * starting at 1. A copy of a copy therefore stacks the suffix
-     * (`XX（复制 1）` → `XX（复制 1）（复制 1）`) rather than trying to parse and
-     * re-number its tail, and the scan covers DISABLED presets too — an off
-     * preset still occupies its name in the roster.
-     * @param source - the preset being duplicated.
-     * @param taken - a set-like predicate over existing names.
-     * @returns the next free display name.
-     */
-    function suffixedName(source, suffix, taken) {
-      const base = String(source?.name ?? '').trim()
+    /** Find the next free localized display name, including disabled presets. */
+    function suffixedName(source, template, taken) {
+      const name = String(source?.name ?? '').trim()
       let index = 1
-      let candidate = `${base}（${suffix} ${index}）`
+      let candidate = format(template, { name, index })
       while (taken(candidate)) {
         index += 1
-        candidate = `${base}（${suffix} ${index}）`
+        candidate = format(template, { name, index })
       }
       return candidate
     }
 
-    /** The duplicate action's suffix (`（复制 N）`). */
-    function copyName(source, taken) {
-      return suffixedName(source, '复制', taken)
-    }
+    const SKILL_GROUP_KEYS = new Map([
+      ['project-dsh', 'skillGroupProjectDsh'],
+      ['project-agents', 'skillGroupProjectAgents'],
+      ['user-dsh', 'skillGroupUserDsh'],
+      ['user-agents', 'skillGroupUserAgents'],
+      ['runtime', 'skillGroupRuntime'],
+      ['custom', 'skillGroupCustom'],
+      ['bundled', 'skillGroupBundled'],
+    ])
 
-    /** The import action's suffix (`（导入 N）`), used only on name conflicts. */
-    function importName(source, taken) {
-      return suffixedName(source, '导入', taken)
+    const CONTEXT_KEYS = new Map([
+      ['working-directory:current', 'contextWorkspace'],
+      ['sandbox:policy', 'contextSandbox'],
+      ['approval:policy', 'contextApproval'],
+      ['subagent:delegation', 'contextDelegation'],
+      ['team:identity', 'contextTeam'],
+      ['harness:source', 'contextSource'],
+      ['app:web-surface', 'contextWeb'],
+    ])
+
+    function localizeContext(row, t) {
+      const key = row.known === false ? undefined : CONTEXT_KEYS.get(row.name)
+      return key === undefined ? row : { ...row, label: t(key + 'Label'), description: t(key + 'Description') }
     }
 
     /** One label + control + hint row, matching the host settings form. */
@@ -1243,7 +1312,7 @@ window.__ModuleLoader__.load({
                 h(
                   'ul',
                   { className: 'aps-nameList' },
-                  roots.map((root) => h('li', { key: root.key }, root.path)),
+                  roots.map((root) => h('li', { key: root.key }, root.path.replace(/^<工作区>/, t('workspacePlaceholder')))),
                 ),
               )
             : null,
@@ -1305,7 +1374,9 @@ window.__ModuleLoader__.load({
                 Disclosure,
                 {
                   key: group.key,
-                  title: format(t('skillSource'), { source: group.label }),
+                  title: format(t('skillSource'), {
+                    source: SKILL_GROUP_KEYS.has(group.key) ? t(SKILL_GROUP_KEYS.get(group.key)) : group.label,
+                  }),
                   count: `${group.skills.filter((skill) => selected.includes(skill.name)).length}/${group.skills.length}`,
                   open: filterKey !== '' || props.openGroups.includes(group.key),
                   onToggle: () => props.onToggleGroup(group.key),
@@ -1426,7 +1497,7 @@ window.__ModuleLoader__.load({
         view === null
           ? null
           : view.available === false
-            ? h('p', { className: 'aps-error' }, format(t('inspectUnavailable'), { reason: view.reason ?? '' }))
+            ? h('p', { className: 'aps-error' }, format(t('inspectUnavailable'), { reason: view.reasonKey === 'runtimeRegistryUnavailable' ? t(view.reasonKey) : view.reason ?? '' }))
             : h(
                 'div',
                 null,
@@ -2096,7 +2167,7 @@ window.__ModuleLoader__.load({
      */
     function ContextPicker(props) {
       const t = props.t
-      const rows = props.rows ?? []
+      const rows = (props.rows ?? []).map((row) => localizeContext(row, t))
       const checked = props.checked ?? []
       const forced = props.forced ?? []
       // The escape hatch is a HOST capability: an older Host silently drops the
@@ -2977,7 +3048,7 @@ window.__ModuleLoader__.load({
           const taken = new Set(state.presets.map((entry) => String(entry.name ?? '').trim()))
           const copy = {
             id: '',
-            name: copyName(preset, (candidate) => taken.has(candidate)),
+            name: suffixedName(preset, t('presetCopyName'), (candidate) => taken.has(candidate)),
             description: preset.description ?? '',
             instructions: preset.instructions ?? '',
             instructionMode: preset.instructionMode ?? 'append',
@@ -3071,7 +3142,7 @@ window.__ModuleLoader__.load({
           for (const row of rows) {
             let name = row.name
             if (taken.has(presetNameKey(name))) {
-              name = importName({ name }, (candidate) => taken.has(presetNameKey(candidate)))
+              name = suffixedName({ name }, t('presetImportName'), (candidate) => taken.has(presetNameKey(candidate)))
               renamed += 1
             }
             await callApi('save', {
@@ -3257,13 +3328,18 @@ window.__ModuleLoader__.load({
         },
         'my-agent-preset: styles',
       )
-      let t = (key) => zh[key] ?? key
+      let t = english
+      T = t
       try {
         ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'my-agent-preset: dictionaries')
-        t = ctx.locale.bind(LOCALE_NS)
+        const translate = ctx.locale.bind(LOCALE_NS)
+        t = (key) => {
+          const value = translate(key)
+          return value == null || value === key ? english(key) : value
+        }
         T = t
       } catch (err) {
-        ctx.logger?.warn?.(`[my-agent-preset] 注册文案失败: ${String(err?.message ?? err)}`)
+        ctx.logger?.warn?.(`[my-agent-preset] Could not register translations: ${String(err?.message ?? err)}`)
       }
       ctx.slots.inject('settings.section', () =>
         ctx.slots.register(

@@ -90,7 +90,7 @@ async function readJson(req) {
   let size = 0
   for await (const chunk of req) {
     size += chunk.length
-    if (size > MAX_BODY_BYTES) throw new Error('请求体过大')
+    if (size > MAX_BODY_BYTES) throw presetError('requestTooLarge', "Request body is too large.")
     chunks.push(chunk)
   }
   if (chunks.length === 0) return {}
@@ -102,9 +102,15 @@ function ok(value) {
   return { ok: true, value }
 }
 
-/** Failure envelope; the Client half surfaces `error.message`. */
+/** Plugin-authored error with a stable key for the settings UI. */
+function presetError(localeKey, detail) {
+  return Object.assign(new Error(detail), { localeKey })
+}
+
+/** Keep the raw detail available to clients without the matching dictionary. */
 function fail(error) {
-  return { ok: false, error: { code: 'my-agent-preset', message: message(error) } }
+  const localeKey = error?.localeKey
+  return { ok: false, error: { code: 'my-agent-preset', message: message(error), ...(localeKey === undefined ? {} : { localeKey }) } }
 }
 
 /** Generate a stable, ASCII, collision-free preset id. */
@@ -863,7 +869,7 @@ const SKILL_SOURCE_LABELS = {
 async function listSkillsInScope(ctx, scopeKey) {
   const skills = ctx.get('skills')
   if (skills === undefined || skills === null || typeof skills.list !== 'function') {
-    return { entries: [], error: 'skills 服务不可用' }
+    return { entries: [], error: 'The skill registry is unavailable.' }
   }
   try {
     return { entries: await skills.list(scopeKey === undefined ? {} : { scope: scopeKey }) }
@@ -2304,7 +2310,7 @@ export class PresetStore {
     const requestedId = text(payload.id)
     const index = requestedId === '' ? -1 : this.presets.findIndex((preset) => preset.id === requestedId)
     const name = text(payload.name)
-    if (name === '') throw new Error('预设名称不能为空')
+    if (name === '') throw presetError('presetNameRequired', "Enter a preset name.")
     // A fresh preset with no snapshot list stays UNMANAGED: undefined means
     // "everything injects", which is exactly what the page showed. Writing the
     // shipped names here used to freeze them — every context a plugin (or a
@@ -2343,7 +2349,7 @@ export class PresetStore {
       createdAt: index >= 0 ? this.presets[index].createdAt : now,
       updatedAt: now,
     })
-    if (next === undefined) throw new Error('预设数据无效')
+    if (next === undefined) throw presetError('invalidPreset', "The preset data is invalid.")
     // `insertAfter` is the copy path: the clone lands directly behind its
     // source and the WHOLE column is re-indexed to document order, so this
     // page's card grid and the New-Session roster (which sorts by `order`)
@@ -2361,7 +2367,7 @@ export class PresetStore {
   async remove(id) {
     const requestedId = text(id)
     const index = this.presets.findIndex((preset) => preset.id === requestedId)
-    if (index < 0) throw new Error('未找到该预设模式')
+    if (index < 0) throw presetError('presetNotFound', "Preset not found.")
     this.presets.splice(index, 1)
     await this.persist()
     await this.reconcile()
@@ -2372,7 +2378,7 @@ export class PresetStore {
   async toggle(id) {
     const requestedId = text(id)
     const preset = this.presets.find((entry) => entry.id === requestedId)
-    if (preset === undefined) throw new Error('未找到该预设模式')
+    if (preset === undefined) throw presetError('presetNotFound', "Preset not found.")
     preset.enabled = preset.enabled === false
     preset.updatedAt = new Date().toISOString()
     await this.persist()
@@ -2394,11 +2400,11 @@ export class PresetStore {
   async inspectPreset(id, config) {
     const requestedId = text(id)
     const preset = this.presets.find((entry) => entry.id === requestedId)
-    if (preset === undefined) throw new Error('未找到该预设模式')
+    if (preset === undefined) throw presetError('presetNotFound', "Preset not found.")
     const override = config !== null && typeof config === 'object' ? config : undefined
     const registry = this.registry
     if (registry === undefined || typeof registry.acquireScope !== 'function') {
-      return { available: false, reason: 'agentPresets 服务不可用' }
+      return { available: false, reason: 'The agent preset registry is unavailable.', reasonKey: 'runtimeRegistryUnavailable' }
     }
     let lease
     try {
@@ -2658,11 +2664,11 @@ function registerWeb(ctx, store) {
             path: `${API_PREFIX}/${name}`,
             handler: async (req, res) => {
               if (!isLoopbackRequest(req)) {
-                sendJson(res, 403, fail(new Error('仅允许本地回环访问')))
+                sendJson(res, 403, fail(presetError('localAccessOnly', "Only local loopback access is allowed.")))
                 return
               }
               if (req.method !== 'POST' && req.method !== 'GET') {
-                sendJson(res, 405, fail(new Error('不支持的请求方法')))
+                sendJson(res, 405, fail(presetError('methodNotAllowed', "Request method not supported.")))
                 return
               }
               try {
